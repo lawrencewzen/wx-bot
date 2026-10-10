@@ -1,3 +1,5 @@
 dist/
 /wx-bot
 *.tmp
+node_modules/
+.wrangler/

@@ -1,0 +1,8 @@
+{
+  "name": "@wx-bot/core",
+  "version": "0.4.0",
+  "description": "Runtime-agnostic WeChat iLink protocol: login, getupdates, send, media crypto, event format",
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "license": "MIT"
+}
