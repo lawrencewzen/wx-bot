@@ -10,7 +10,7 @@ export interface ApiOptions {
   /** When non-empty, /v1/* requires Authorization: Bearer <token>. */
   token?: string;
   send(req: SendRequest): Promise<void>;
-  status(): unknown;
+  status(): unknown | Promise<unknown>;
   inbox?: Inbox;
   pullBindings?: string[];
   /** Resolve a path given in a JSON /v1/send body. Omit where there is no filesystem. */
@@ -107,7 +107,7 @@ export function createApiHandler(o: ApiOptions): (req: Request) => Promise<Respo
           await o.send(await parseSend(req, o));
           return json(200, { ok: true });
         case "GET /v1/status":
-          return json(200, { bindings: o.status() });
+          return json(200, { bindings: await o.status() });
         case "GET /v1/events": {
           if (!o.inbox) return json(500, { error: "inbox not configured" });
           let bindings: string[];

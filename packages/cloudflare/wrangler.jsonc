@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "wx-bot",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "durable_objects": {
+    "bindings": [{ "name": "WXBOT", "class_name": "WxBinding" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["WxBinding"] }],
+  "observability": { "enabled": true }
+  // Optional media storage:
+  // "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "wx-bot-media" }]
+}

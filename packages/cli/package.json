@@ -1,0 +1,19 @@
+{
+  "name": "@wx-bot/cli",
+  "version": "0.4.0",
+  "description": "wx-bot command line: WeChat iLink bridge for personal agents",
+  "type": "module",
+  "bin": { "wx-bot": "./src/main.ts" },
+  "scripts": {
+    "build": "bun build src/main.ts --compile --minify --outfile ../../dist/wx-bot",
+    "cross": "bun run scripts/cross.ts"
+  },
+  "dependencies": {
+    "@wx-bot/core": "workspace:*",
+    "qrcode": "1.5.4"
+  },
+  "devDependencies": {
+    "@types/qrcode": "1.5.5"
+  },
+  "license": "MIT"
+}

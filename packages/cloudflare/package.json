@@ -1,0 +1,19 @@
+{
+  "name": "@wx-bot/cloudflare",
+  "version": "0.4.0",
+  "description": "wx-bot on Cloudflare Workers: one Durable Object per WeChat binding, alarm-driven polling",
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@wx-bot/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260925.1",
+    "wrangler": "4.147.0"
+  },
+  "license": "MIT"
+}
