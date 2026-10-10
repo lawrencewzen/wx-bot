@@ -30,3 +30,11 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: false
+      - name: Smoke-test the amd64 image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: wx-bot:ci
+      - run: docker run --rm wx-bot:ci version && docker run --rm --entrypoint id wx-bot:ci
