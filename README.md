@@ -93,6 +93,20 @@ wx-bot run                # 启动
 
 然后**先用你的微信给 ClawBot 发一条消息**，之后 Agent 才能回复你。
 
+### 升级
+
+配置、登录状态、收件箱都兼容，不需要重新扫码；正在运行的服务会自动重启。
+
+```bash
+wx-bot update                 # v0.4.0 及以后
+wx-bot update --check         # 只检查有没有新版本
+
+# 任何版本都适用（包括 Go 版 v0.3.x），也可用于首次安装：
+curl -fsSL https://raw.githubusercontent.com/lawrencewzen/wx-bot/main/install.sh | bash
+```
+
+让 Agent 升级：对它说「帮我把 wx-bot 升级到最新版」。Docker 部署改镜像标签后 `docker compose up -d`。回滚：`wx-bot update --version <旧版本>`。
+
 ### 其他部署方式（可选）
 
 Agent 本身部署在 Cloudflare 上，或者没有可以常驻进程的机器时，可以把 wx-bot 部署到 Cloudflare Workers：每个微信号一个 Durable Object，用 Alarm 拉消息。见 [`docs/integrations/cloudflare.md`](docs/integrations/cloudflare.md)。
@@ -193,8 +207,6 @@ curl -X POST http://127.0.0.1:18790/v1/send \
 **poller 停了，日志提示 `-14`？** 会话过期，重新 `wx-bot login <binding>`。
 
 **`send` 报 `no context_token`？** 该用户还没给 bot 发过消息，先发一条再回。
-
-**怎么升级？** 换掉程序文件、重启服务即可，配置和登录状态都兼容（包括从 Go 版升级到 TypeScript 版）。让 Agent 按 [`AGENTS.md` 的「升级」](AGENTS.md#升级)执行，或手动 `git pull && ./install.sh` 后重启。Docker 部署改镜像标签。
 
 **Alpine 上跑不起来？** 发布版依赖 glibc，Alpine 等 musl 系统请用 `wx-bot_linux_<arch>_musl`；`install.sh` 会自动选择。
 

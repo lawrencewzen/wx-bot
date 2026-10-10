@@ -131,21 +131,22 @@ wx-bot 跑在**你自己的运行环境**里（不是用户的 Mac），作为 s
 
 ## 升级
 
-用户让你「升级 wx-bot」时执行。配置、登录状态、收件箱都兼容，**不需要重新扫码**；从 Go 版（v0.3.x 及以前）升级到 TypeScript 版（v0.4.0 起）也一样。
+用户让你「升级 wx-bot」时执行。配置、登录状态、收件箱都兼容，**不需要重新扫码**。
 
-1. **记下当前版本**：`~/.local/bin/wx-bot version`。
-2. **停服务**（按安装方式选一个）：
-   - Muse（systemd 系统服务）：`systemctl stop wx-bot`
-   - Linux 用户服务：`systemctl --user stop wx-bot`
-   - macOS：`launchctl unload ~/Library/LaunchAgents/com.lawrencewzen.wx-bot.plist`
-   - 没装服务、直接跑的 `wx-bot run`：结束该进程。
-3. **下载新版并替换**：与 [Muse 第 1 步](#muse)相同（含 musl 判断和 sha256 校验）。也可以在仓库目录里 `git pull && ./install.sh`：没有 Bun 时它会下载发布版，不会复用 `dist/` 里的旧文件。
-4. **启动服务**（与第 2 步对应）：`systemctl start wx-bot` / `systemctl --user start wx-bot` / `launchctl load …`，或重新运行 `wx-bot run`。
-5. **确认**：`wx-bot version` 显示新版本，`wx-bot status` 显示 `logged_in: true`。
-6. **更新回复指令**：如果你的 routine 或 hook 指令里回复写的是 `--text '<回复>'`，改成 `--text -` 加带引号的 heredoc（见本文开头），引号就不用再手动转义。
-7. **告诉用户**：从哪个版本升级到哪个版本；让用户发一条微信确认能正常对话。
+1. **升级**：
+   - 先试 `~/.local/bin/wx-bot update`（v0.4.0 及以后都有）。
+   - 报 `unknown command "update"` 说明是旧版（包括 Go 版 v0.3.x），改用：
 
-Docker 部署（例如 Pi Durable）不用这一节：把镜像标签改成新版本，然后 `docker compose up -d`，数据卷不变。
+     ```bash
+     curl -fsSL https://raw.githubusercontent.com/lawrencewzen/wx-bot/main/install.sh | bash
+     ```
+
+   两种方式都会自动选对文件（含 musl）、校验 sha256、替换程序，并重启正在运行的 systemd / launchd 服务。输出里出现 `restart it` 时，按提示手动重启（例如 Muse 的系统服务需要 `sudo systemctl restart wx-bot`）。
+2. **确认**：`wx-bot version` 是新版本，`wx-bot status` 显示 `logged_in: true`。
+3. **更新回复指令**：你的 routine 或 hook 指令里如果回复写的是 `--text '<回复>'`，改成 `--text -` 加带引号的 heredoc（见本文开头），引号就不用再手动转义。
+4. **告诉用户**：从哪个版本升级到哪个版本，并请用户发一条微信确认能正常对话。
+
+出问题需要回滚：`wx-bot update --version <旧版本号>`。Docker 部署（例如 Pi Durable）不用这一节：改镜像标签后 `docker compose up -d`。
 
 ---
 

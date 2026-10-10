@@ -21,7 +21,12 @@ jobs:
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --generate-notes
+        run: |
+          sed -e "s/__VERSION__/${GITHUB_REF_NAME}/g" -e "s/__VERSION_NUM__/${GITHUB_REF_NAME#v}/g" \
+            .github/release-notes.md > "$RUNNER_TEMP/notes.md"
+          # The upgrade guide comes first; GitHub appends the generated change list.
+          gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" \
+            --notes-file "$RUNNER_TEMP/notes.md" --generate-notes
 
   image:
     runs-on: ubuntu-24.04

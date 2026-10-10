@@ -5,6 +5,7 @@ import { cmdLogin } from "./cmd/login.ts";
 import { cmdRun } from "./cmd/run.ts";
 import { cmdSend } from "./cmd/send.ts";
 import { cmdStatus } from "./cmd/status.ts";
+import { cmdUpdate } from "./cmd/update.ts";
 import { FlagError, parseFlags, usageLines } from "./flags.ts";
 import { setLevel } from "./log.ts";
 
@@ -28,6 +29,7 @@ Commands:
   send              Send a message (see wx-bot send -h)
   inbox             Claim / ack queued events for pull bindings (see wx-bot inbox)
   status            Show per-binding login / delivery / inbox state
+  update            Upgrade to the latest release (see wx-bot update -h)
   version           Print version
 
 Flags:
@@ -56,6 +58,7 @@ async function main(argv: string[]): Promise<number> {
     return console.error(`wx-bot: ${(err as Error).message}`), 2;
   }
   if (cmd === "version") return console.log(`wx-bot ${VERSION}`), 0;
+  if (cmd === "update") return cmdUpdate(VERSION, rest);
   const path = parsed.values.config || defaultConfigPath();
   switch (cmd) {
     case "login":
