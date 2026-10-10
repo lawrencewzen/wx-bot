@@ -9,6 +9,7 @@
 //   POST /b/<binding>/login            start QR login -> {qrcode_url}
 //   GET  /b/<binding>/login            login progress
 //   PUT  /b/<binding>/session          import an existing session (migration)
+//   DELETE /b/<binding>/session        log out: stop polling, forget credentials
 //   GET|PUT /b/<binding>/config        delivery, webhook, allow_wxids
 //   GET  /b/<binding>/media/<key>      download stored media
 //   /b/<binding>/v1/...                the standard API (send, status, events, ack)
@@ -202,6 +203,13 @@ export class WxBinding extends DurableObject<Env> {
         const b = (await req.json()) as { session?: Session; context_tokens?: Record<string, string>; cursor?: string };
         if (!b.session?.bot_token || !b.session.base_url) throw new WxBotError("bad_request", "session.bot_token and session.base_url are required");
         await this.useSession(b.session, b.context_tokens, b.cursor);
+        return json(200, { ok: true });
+      }
+      if (path === "/session" && req.method === "DELETE") {
+        // Log out: stop polling and forget credentials; the inbox is kept.
+        await this.ctx.storage.delete([K.session, K.tokens, K.cursor, K.expired, K.login]);
+        this.client = undefined;
+        this.pollAbort?.abort();
         return json(200, { ok: true });
       }
       if (path === "/config" && req.method === "GET") {

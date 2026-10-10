@@ -1,5 +1,7 @@
 # 部署到 Cloudflare Workers
 
+> 这是**可选**的部署方式。常规用法是把命令行版 `wx-bot` 装在 Agent 所在的机器上（例如 Grok Bot、Muse 的云电脑），见 README 和 [`AGENTS.md`](../../AGENTS.md)。
+
 `packages/cloudflare` 把 wx-bot 跑在 Cloudflare Workers 上：**每个微信号（binding）一个 Durable Object**，用 Alarm 长轮询微信，不需要自己的机器常开。收件箱、登录状态存在 Durable Object 自带的 SQLite 里，媒体文件存在 R2（可选）。对外接口和命令行版一致，见 [`docs/protocol.md`](../protocol.md)。
 
 ## 和命令行版的区别
@@ -70,6 +72,12 @@ EOF
 ```
 
 导入后**停掉命令行版的 `wx-bot run`**：同一个微信号同时被两处轮询，消息会被分走。
+
+### 退出登录
+
+```bash
+curl -X DELETE -H "$H" $W/b/muse/session     # 停止轮询并删除登录凭据；收件箱保留
+```
 
 ## 在同一个 Worker 里直接调用（RPC）
 

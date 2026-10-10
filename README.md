@@ -13,7 +13,6 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/TypeScript-Bun-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript + Bun">
-  <img src="https://img.shields.io/badge/Cloudflare-Workers-F38020?style=flat-square&logo=cloudflare&logoColor=white" alt="Cloudflare Workers">
   <img src="https://img.shields.io/badge/Linux-supported-FCC624?style=flat-square&logo=linux&logoColor=black" alt="Linux">
   <img src="https://img.shields.io/badge/macOS-supported-8E8E93?style=flat-square&logo=apple&logoColor=white" alt="macOS">
   <img src="https://img.shields.io/badge/WeChat-ClawBot%20%2F%20iLink-07C160?style=flat-square&logo=wechat&logoColor=white" alt="WeChat ClawBot / iLink">
@@ -41,7 +40,7 @@
 - **默认白名单**：只放行扫码登录的微信号；其他人的消息不转发、不回复。
 - **多绑定**：一个微信号对应一个 Agent，会话过期只停该绑定。
 
-平台：Linux / macOS（amd64、arm64）命令行版，或部署到 **Cloudflare Workers**（不需要自己的机器常开）。不支持 Windows。
+平台：Linux / macOS（amd64、arm64），不支持 Windows。通常和 Agent 装在同一台机器上，例如 Grok Bot、Muse 的云电脑。
 
 ```
 +--------+  iLink getupdates   +-------------------+  webhook (push)     +---------+
@@ -73,9 +72,7 @@
 
 用官方 Docker 镜像 `ghcr.io/lawrencewzen/wx-bot`，见 [`docs/integrations/pi-durable.md`](docs/integrations/pi-durable.md)。
 
-### 部署到 Cloudflare Workers
 
-每个微信号一个 Durable Object，用 Alarm 轮询，不需要自己的机器常开；同一个 Worker 里的 Agent 可以直接 RPC 调用。见 [`docs/integrations/cloudflare.md`](docs/integrations/cloudflare.md)。
 
 ### 手动安装
 
@@ -95,6 +92,10 @@ wx-bot run                # 启动
 ```
 
 然后**先用你的微信给 ClawBot 发一条消息**，之后 Agent 才能回复你。
+
+### 其他部署方式（可选）
+
+Agent 本身部署在 Cloudflare 上，或者没有可以常驻进程的机器时，可以把 wx-bot 部署到 Cloudflare Workers：每个微信号一个 Durable Object，用 Alarm 拉消息。见 [`docs/integrations/cloudflare.md`](docs/integrations/cloudflare.md)。
 
 ## 配置
 
@@ -207,7 +208,7 @@ TypeScript monorepo（Bun workspaces）：
 | --- | --- |
 | `packages/core` | 微信 iLink 协议、收件箱、webhook 投递、HTTP API；只用 `fetch` / WebCrypto，任何运行时都能用 |
 | `packages/cli` | 命令行版（`wx-bot login/run/send/inbox/status`），编译成单文件可执行程序 |
-| `packages/cloudflare` | Cloudflare Workers 版（Durable Object + Alarm） |
+| `packages/cloudflare` | 可选的 Cloudflare Workers 部署（Durable Object + Alarm） |
 
 ```bash
 bun install
