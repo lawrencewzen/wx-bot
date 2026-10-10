@@ -8,6 +8,7 @@
 | Muse（运行环境有 systemd 和 hooks） | pull | [Muse](#muse) |
 | Pi Durable 或其他有 HTTP 入口的 Agent Runtime | webhook | [Pi Durable](#pi-durable) |
 | 其他 | 按 [`docs/protocol.md`](docs/protocol.md) 选择 | — |
+| **已经装过，用户让你升级 wx-bot** | — | [升级](#升级) |
 
 所有 Agent 都要遵守：
 
@@ -66,7 +67,7 @@
    - `~/.config/wx-bot/config.json`：`bindings[0].webhook.url` 填用户给的 URL，`key` 保持 `env:WXBOT_WEBHOOK_KEY`。不用签名时**删掉 `secret` 这一行**，否则环境变量未设置会导致启动失败。
    - `~/.config/wx-bot/env`：写入 `WXBOT_WEBHOOK_KEY=<key>`（格式 `KEY=value`，不加 `export`）。
 
-6. **扫码登录**：运行 `wx-bot login xiaox`，把二维码展示给用户，让用户用微信扫码。二维码过期会自动刷新最多 3 次。
+6. **扫码登录**：运行 `wx-bot login <binding>`（`<binding>` 是配置里 `bindings[0].name`，示例配置为 `xiaox`），把二维码展示给用户，让用户用微信扫码。二维码过期会自动刷新最多 3 次。
 
 7. **启动**：按 `install.sh` 输出的命令加载 systemd / launchd 服务；或直接运行 `wx-bot run`。用 `wx-bot status` 确认在运行。
 
@@ -83,11 +84,13 @@ wx-bot 跑在**你自己的运行环境**里（不是用户的 Mac），作为 s
    ```bash
    mkdir -p ~/.local/bin
    case "$(uname -m)" in x86_64) ARCH=amd64 ;; aarch64|arm64) ARCH=arm64 ;; esac
+   LIBC=""; ls /lib/ld-musl-* >/dev/null 2>&1 && LIBC=_musl      # Alpine 等 musl 系统
+   ASSET="wx-bot_linux_${ARCH}${LIBC}"
    BASE=https://github.com/lawrencewzen/wx-bot/releases/latest/download
    cd ~/.local/bin
-   curl -fLO "$BASE/wx-bot_linux_$ARCH" && curl -fLO "$BASE/checksums.txt"
+   curl -fLO "$BASE/$ASSET" && curl -fLO "$BASE/checksums.txt"
    sha256sum -c --ignore-missing checksums.txt
-   mv "wx-bot_linux_$ARCH" wx-bot && chmod 0755 wx-bot && rm checksums.txt
+   mv "$ASSET" wx-bot && chmod 0755 wx-bot && rm checksums.txt
    ~/.local/bin/wx-bot version
    ```
 
@@ -123,6 +126,26 @@ wx-bot 跑在**你自己的运行环境**里（不是用户的 Mac），作为 s
    5. `send` 失败时按本文开头的规则在 Muse 聊天里告诉用户；登录过期就重做第 3 步并重启服务。
 
 7. **告诉用户**：先用自己的微信给 ClawBot 发一条消息，之后就能对话。
+
+---
+
+## 升级
+
+用户让你「升级 wx-bot」时执行。配置、登录状态、收件箱都兼容，**不需要重新扫码**；从 Go 版（v0.3.x 及以前）升级到 TypeScript 版（v0.4.0 起）也一样。
+
+1. **记下当前版本**：`~/.local/bin/wx-bot version`。
+2. **停服务**（按安装方式选一个）：
+   - Muse（systemd 系统服务）：`systemctl stop wx-bot`
+   - Linux 用户服务：`systemctl --user stop wx-bot`
+   - macOS：`launchctl unload ~/Library/LaunchAgents/com.lawrencewzen.wx-bot.plist`
+   - 没装服务、直接跑的 `wx-bot run`：结束该进程。
+3. **下载新版并替换**：与 [Muse 第 1 步](#muse)相同（含 musl 判断和 sha256 校验）。也可以在仓库目录里 `git pull && ./install.sh`：没有 Bun 时它会下载发布版，不会复用 `dist/` 里的旧文件。
+4. **启动服务**（与第 2 步对应）：`systemctl start wx-bot` / `systemctl --user start wx-bot` / `launchctl load …`，或重新运行 `wx-bot run`。
+5. **确认**：`wx-bot version` 显示新版本，`wx-bot status` 显示 `logged_in: true`。
+6. **更新回复指令**：如果你的 routine 或 hook 指令里回复写的是 `--text '<回复>'`，改成 `--text -` 加带引号的 heredoc（见本文开头），引号就不用再手动转义。
+7. **告诉用户**：从哪个版本升级到哪个版本；让用户发一条微信确认能正常对话。
+
+Docker 部署（例如 Pi Durable）不用这一节：把镜像标签改成新版本，然后 `docker compose up -d`，数据卷不变。
 
 ---
 

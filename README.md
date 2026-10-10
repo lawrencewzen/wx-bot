@@ -194,6 +194,10 @@ curl -X POST http://127.0.0.1:18790/v1/send \
 
 **`send` 报 `no context_token`？** 该用户还没给 bot 发过消息，先发一条再回。
 
+**怎么升级？** 换掉程序文件、重启服务即可，配置和登录状态都兼容（包括从 Go 版升级到 TypeScript 版）。让 Agent 按 [`AGENTS.md` 的「升级」](AGENTS.md#升级)执行，或手动 `git pull && ./install.sh` 后重启。Docker 部署改镜像标签。
+
+**Alpine 上跑不起来？** 发布版依赖 glibc，Alpine 等 musl 系统请用 `wx-bot_linux_<arch>_musl`；`install.sh` 会自动选择。
+
 **二维码过期？** 自动刷新最多 3 次，仍失败就重跑 `login`。
 
 **要把二维码发给别人扫？** `wx-bot login <binding> --qr-png ./qr.png` 会同时写出 PNG 图片。

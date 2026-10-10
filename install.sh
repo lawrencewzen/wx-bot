@@ -7,6 +7,10 @@ Install wx-bot (Linux / macOS only).
 
 Usage: ./install.sh [--system] [--service] [--prefix DIR]
 
+Builds from source when bun is installed; otherwise downloads the latest
+release binary (musl build on Alpine). Set WXBOT_BINARY=/path/to/wx-bot to
+install a binary you already have.
+
   --system    install to /usr/local/bin (default: ~/.local/bin)
   --service   install systemd --user unit (Linux) or launchd plist (macOS)
   --prefix    install prefix (default ~/.local or /usr/local with --system)
@@ -40,6 +44,13 @@ case "$uname_s" in
     exit 1
     ;;
 esac
+
+# Release binaries embed the Bun runtime and link against the C library:
+# Alpine and other musl systems need the *_musl build.
+LIBC=""
+if [[ "$GOOS" == linux ]] && { ls /lib/ld-musl-* >/dev/null 2>&1 || ldd --version 2>&1 | grep -qi musl; }; then
+  LIBC="_musl"
+fi
 
 uname_m="$(uname -m)"
 case "$uname_m" in
@@ -75,22 +86,26 @@ if command -v bun >/dev/null 2>&1 && [[ -f "${ROOT}/packages/cli/src/main.ts" ]]
   (cd "$ROOT" && bun install --frozen-lockfile --production --filter @wx-bot/cli >/dev/null)
   (cd "$ROOT/packages/cli" && bun build src/main.ts --compile --minify \
     --define WXBOT_VERSION="\"${VERSION}\"" --outfile "${BINDIR}/wx-bot")
+elif [[ -n "${WXBOT_BINARY:-}" ]]; then
+  # Offline install from a binary you already have.
+  echo "installing $WXBOT_BINARY"
+  install -m 0755 "$WXBOT_BINARY" "${BINDIR}/wx-bot"
 else
-  DIST="${ROOT}/dist/wx-bot_${GOOS}_${GOARCH}"
-  if [[ ! -f "$DIST" ]]; then
-    echo "bun is not installed and $DIST is missing; downloading the latest release"
-    mkdir -p "${ROOT}/dist"
-    BASE="https://github.com/lawrencewzen/wx-bot/releases/latest/download"
-    curl -fL -o "$DIST" "$BASE/wx-bot_${GOOS}_${GOARCH}"
-    curl -fL -o "${ROOT}/dist/checksums.txt" "$BASE/checksums.txt"
-    if command -v sha256sum >/dev/null 2>&1; then
-      (cd "${ROOT}/dist" && sha256sum -c --ignore-missing checksums.txt)
-    else
-      (cd "${ROOT}/dist" && shasum -a 256 -c --ignore-missing checksums.txt)
-    fi
+  # Always download: a dist/ left over from an older build (e.g. the Go
+  # version) must not be reinstalled by accident.
+  ASSET="wx-bot_${GOOS}_${GOARCH}${LIBC}"
+  BASE="${WXBOT_RELEASE_URL:-https://github.com/lawrencewzen/wx-bot/releases/latest/download}"
+  TMP="$(mktemp -d)"
+  trap 'rm -rf "$TMP"' EXIT
+  echo "bun is not installed; downloading $ASSET from the latest release"
+  curl -fL --retry 3 -o "$TMP/$ASSET" "$BASE/$ASSET"
+  curl -fL --retry 3 -o "$TMP/checksums.txt" "$BASE/checksums.txt"
+  if command -v sha256sum >/dev/null 2>&1; then
+    (cd "$TMP" && sha256sum -c --ignore-missing checksums.txt)
+  else
+    (cd "$TMP" && shasum -a 256 -c --ignore-missing checksums.txt)
   fi
-  echo "installing prebuilt $DIST"
-  install -m 0755 "$DIST" "${BINDIR}/wx-bot"
+  install -m 0755 "$TMP/$ASSET" "${BINDIR}/wx-bot"
 fi
 chmod 0755 "${BINDIR}/wx-bot"
 

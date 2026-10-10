@@ -7,7 +7,7 @@ Pi Durable 通过 **webhook** 接收微信消息，通过本地 `POST /v1/send` 
 使用官方镜像，不需要自己克隆源码或打补丁：
 
 ```
-ghcr.io/lawrencewzen/wx-bot:<版本>      # 例如 0.3.0；也有 0.3 和 latest
+ghcr.io/lawrencewzen/wx-bot:<版本>      # 例如 0.4.0；也有 0.4 和 latest
 ```
 
 镜像支持 `linux/amd64`、`linux/arm64`，以非 root 用户 `bot` 运行，`/state` 和 `/media` 为数据卷。配置文件挂载到 `/etc/wx-bot/config.json`。
@@ -51,7 +51,7 @@ services:
 
   wx-bot:
     profiles: ["wechat"]
-    image: ghcr.io/lawrencewzen/wx-bot:0.3.0
+    image: ghcr.io/lawrencewzen/wx-bot:0.4.0
     restart: unless-stopped
     env_file: .env
     depends_on:
@@ -106,7 +106,7 @@ v0.3.0 起，`deploy/wechat/patch_upstream.py` 里的修改都已在上游：
 
 迁移步骤：
 
-1. compose 里 `wx-bot` 服务改用 `image: ghcr.io/lawrencewzen/wx-bot:0.3.0`，删除 `build`。
+1. compose 里 `wx-bot` 服务改用 `image: ghcr.io/lawrencewzen/wx-bot:0.4.0`，删除 `build`。
 2. 配置文件改为挂载（见第 3 节）。
 3. 删除 `deploy/wechat/Dockerfile` 和 `deploy/wechat/patch_upstream.py`。
 4. 现有 `wx-bot-state` 卷可直接沿用，登录状态和游标不丢；`inbox.db` 首次启动时自动创建。若容器内无法写入 `/state`，检查卷内文件属主是否与镜像中的 `bot` 用户一致。
