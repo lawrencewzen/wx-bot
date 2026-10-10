@@ -70,14 +70,24 @@ if [[ -z "${VERSION:-}" ]]; then
   VERSION="${VERSION:-dev}"
 fi
 
-if command -v go >/dev/null 2>&1; then
-  echo "building from source with $(go version)"
-  (cd "$ROOT" && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o "${BINDIR}/wx-bot" ./cmd/wx-bot)
+if command -v bun >/dev/null 2>&1 && [[ -f "${ROOT}/packages/cli/src/main.ts" ]]; then
+  echo "building from source with bun $(bun --version)"
+  (cd "$ROOT" && bun install --frozen-lockfile --production --filter @wx-bot/cli >/dev/null)
+  (cd "$ROOT/packages/cli" && bun build src/main.ts --compile --minify \
+    --define WXBOT_VERSION="\"${VERSION}\"" --outfile "${BINDIR}/wx-bot")
 else
   DIST="${ROOT}/dist/wx-bot_${GOOS}_${GOARCH}"
   if [[ ! -f "$DIST" ]]; then
-    echo "Go is not installed and $DIST is missing. Install Go 1.24+ or provide a prebuilt binary." >&2
-    exit 1
+    echo "bun is not installed and $DIST is missing; downloading the latest release"
+    mkdir -p "${ROOT}/dist"
+    BASE="https://github.com/lawrencewzen/wx-bot/releases/latest/download"
+    curl -fL -o "$DIST" "$BASE/wx-bot_${GOOS}_${GOARCH}"
+    curl -fL -o "${ROOT}/dist/checksums.txt" "$BASE/checksums.txt"
+    if command -v sha256sum >/dev/null 2>&1; then
+      (cd "${ROOT}/dist" && sha256sum -c --ignore-missing checksums.txt)
+    else
+      (cd "${ROOT}/dist" && shasum -a 256 -c --ignore-missing checksums.txt)
+    fi
   fi
   echo "installing prebuilt $DIST"
   install -m 0755 "$DIST" "${BINDIR}/wx-bot"

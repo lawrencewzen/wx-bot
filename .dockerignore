@@ -1,6 +1,9 @@
 .git
 .github
 dist
-/wx-bot
+node_modules
+**/node_modules
+**/.wrangler
+**/.dev.vars
 docs
 *.tmp

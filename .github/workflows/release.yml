@@ -11,13 +11,12 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
         with:
-          fetch-depth: 0
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-      - run: go vet ./... && go test -race ./...
-      - run: make cross VERSION=${GITHUB_REF_NAME}
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck && bun test
+      - run: cd packages/cli && bun run scripts/cross.ts "$GITHUB_REF_NAME"
       - run: cd dist && sha256sum wx-bot_* > checksums.txt
       - name: Create GitHub release
         env:

@@ -13,12 +13,12 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: oven-sh/setup-bun@v2
         with:
-          go-version-file: go.mod
-      - run: test -z "$(gofmt -l .)"
-      - run: go vet ./...
-      - run: go test -race ./...
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun test
 
   docker:
     runs-on: ubuntu-24.04

@@ -12,7 +12,8 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Go-1.24-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go 1.24">
+  <img src="https://img.shields.io/badge/TypeScript-Bun-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript + Bun">
+  <img src="https://img.shields.io/badge/Cloudflare-Workers-F38020?style=flat-square&logo=cloudflare&logoColor=white" alt="Cloudflare Workers">
   <img src="https://img.shields.io/badge/Linux-supported-FCC624?style=flat-square&logo=linux&logoColor=black" alt="Linux">
   <img src="https://img.shields.io/badge/macOS-supported-8E8E93?style=flat-square&logo=apple&logoColor=white" alt="macOS">
   <img src="https://img.shields.io/badge/WeChat-ClawBot%20%2F%20iLink-07C160?style=flat-square&logo=wechat&logoColor=white" alt="WeChat ClawBot / iLink">
@@ -40,7 +41,7 @@
 - **默认白名单**：只放行扫码登录的微信号；其他人的消息不转发、不回复。
 - **多绑定**：一个微信号对应一个 Agent，会话过期只停该绑定。
 
-平台：Linux / macOS（amd64、arm64），不支持 Windows。
+平台：Linux / macOS（amd64、arm64）命令行版，或部署到 **Cloudflare Workers**（不需要自己的机器常开）。不支持 Windows。
 
 ```
 +--------+  iLink getupdates   +-------------------+  webhook (push)     +---------+
@@ -72,9 +73,13 @@
 
 用官方 Docker 镜像 `ghcr.io/lawrencewzen/wx-bot`，见 [`docs/integrations/pi-durable.md`](docs/integrations/pi-durable.md)。
 
+### 部署到 Cloudflare Workers
+
+每个微信号一个 Durable Object，用 Alarm 轮询，不需要自己的机器常开；同一个 Worker 里的 Agent 可以直接 RPC 调用。见 [`docs/integrations/cloudflare.md`](docs/integrations/cloudflare.md)。
+
 ### 手动安装
 
-从 [Releases](https://github.com/lawrencewzen/wx-bot/releases) 下载对应平台的二进制，或用源码安装（需要 Go 1.24+）：
+从 [Releases](https://github.com/lawrencewzen/wx-bot/releases) 下载对应平台的单文件可执行程序，或用源码安装（需要 [Bun](https://bun.sh)；没有 Bun 时 `install.sh` 会自动下载发布版）：
 
 ```bash
 git clone https://github.com/lawrencewzen/wx-bot
@@ -196,9 +201,18 @@ curl -X POST http://127.0.0.1:18790/v1/send \
 
 ## 开发
 
+TypeScript monorepo（Bun workspaces）：
+
+| 包 | 内容 |
+| --- | --- |
+| `packages/core` | 微信 iLink 协议、收件箱、webhook 投递、HTTP API；只用 `fetch` / WebCrypto，任何运行时都能用 |
+| `packages/cli` | 命令行版（`wx-bot login/run/send/inbox/status`），编译成单文件可执行程序 |
+| `packages/cloudflare` | Cloudflare Workers 版（Durable Object + Alarm） |
+
 ```bash
-go vet ./... && go test ./...
-make cross                # dist/wx-bot_{linux,darwin}_{amd64,arm64}
+bun install
+bun run typecheck && bun test
+cd packages/cli && bun run scripts/cross.ts      # dist/wx-bot_{linux,darwin}_{amd64,arm64}
 ```
 
 ---
