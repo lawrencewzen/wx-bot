@@ -2,7 +2,9 @@
   "name": "wx-bot-monorepo",
   "private": true,
   "type": "module",
-  "workspaces": ["packages/*"],
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "test": "bun test",
     "typecheck": "tsc -p packages/core && tsc -p packages/cli && tsc -p packages/cloudflare",
@@ -11,5 +13,6 @@
   "devDependencies": {
     "@types/bun": "1.3.14",
     "typescript": "5.9.3"
-  }
+  },
+  "packageManager": "bun@1.3.14"
 }

@@ -188,8 +188,9 @@ async function parseMultipart(req: Request): Promise<SendRequest> {
     return v;
   };
   let media: OutgoingMedia | undefined;
-  for (const [name, value] of form.entries()) {
-    if (typeof value === "string") continue;
+  for (const [name, entry] of form.entries()) {
+    if (typeof entry === "string") continue;
+    const value = entry as unknown as File;
     if (name !== "image" && name !== "file" && name !== "video") {
       throw new WxBotError("bad_request", `file part must be named image, file or video, got "${name}"`);
     }
