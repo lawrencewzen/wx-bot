@@ -288,10 +288,11 @@ export class WxBinding extends DurableObject<Env> {
     const name = await this.ctx.storage.get<string>(K.binding);
     if (!name) return;
 
-    await this.loginStep(deadline);
     this.inbox.prune(RETENTION_MS);
 
-    const tasks: Promise<unknown>[] = [];
+    // Login, polling and delivery run side by side: a pending QR login must
+    // not pause message flow for the current session.
+    const tasks: Promise<unknown>[] = [this.loginStep(deadline)];
     const ctl = new AbortController();
     this.pollAbort = ctl;
     const stopAt = setTimeout(() => ctl.abort(), Math.max(0, deadline - Date.now()));
