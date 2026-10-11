@@ -52,7 +52,7 @@ wx-bot 跑在**你自己的运行环境**里（不是用户的 Mac），作为 s
    systemctl status wx-bot --no-pager && ~/.local/bin/wx-bot status
    ```
 
-   `status` 应显示 `logged_in: true`、`delivery: pull`。再等 15 秒运行 `~/.local/bin/wx-bot health --binding muse --grace 0`，退出码必须为 0；否则按输出提示处理（最常见的是第 2 步的代理没写）。**每次重新扫码或改了 env 文件后都要 `systemctl restart wx-bot`**。
+   `systemctl is-enabled wx-bot` 应为 `enabled`：系统服务随电脑开机自动启动，重启后不用管。`status` 应显示 `logged_in: true`、`delivery: pull`。再等 15 秒运行 `~/.local/bin/wx-bot health --binding muse --grace 0`，退出码必须为 0；否则按输出提示处理（最常见的是第 2 步的代理没写）。**每次重新扫码或改了 env 文件后都要 `systemctl restart wx-bot`**。
 
 5. **建 hook**：按 [`adapters/muse/wechat-hook.sh`](../../adapters/muse/wechat-hook.sh) 在 `~/hooks/scripts/` 下写检测脚本，套用你的 hook 脚本协议：
    - `wx-bot inbox count --binding muse` 大于 0 时 `wake`（有新消息）；

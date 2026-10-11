@@ -169,6 +169,13 @@ fi
 cp "$TMP/wx-bot" "${TARGET}.new.$$"
 mv -f "${TARGET}.new.$$" "$TARGET"
 
+# ---------- keepalive helper (refreshed on every install / upgrade) ----------
+# Restarts wx-bot run if it is down; meant for a scheduled agent routine.
+repo_file deploy/keepalive.sh "$TMP/keepalive"
+sed 's|\$HOME/.local/bin/wx-bot|'"${TARGET}"'|' "$TMP/keepalive" > "$TMP/keepalive.sh"
+install -m 0755 "$TMP/keepalive.sh" "${BINDIR}/wx-bot-keepalive"
+echo "installed ${BINDIR}/wx-bot-keepalive"
+
 # ---------- config (first install only; never overwritten) ----------
 
 CFGDIR="${HOME}/.config/wx-bot"
@@ -214,6 +221,14 @@ if [[ "$SERVICE" -eq 1 ]]; then
     if command -v systemctl >/dev/null 2>&1; then
       systemctl --user daemon-reload || true
       [[ -z "$OLD_VERSION" ]] && echo "enable with: systemctl --user enable --now wx-bot"
+    fi
+    # A user service only starts at boot when lingering is on.
+    if command -v loginctl >/dev/null 2>&1; then
+      if loginctl enable-linger "$(id -un)" 2>/dev/null; then
+        echo "lingering enabled: the user service starts at boot"
+      else
+        echo "could not enable lingering; the service may not start after a reboot (try: sudo loginctl enable-linger $(id -un))"
+      fi
     fi
   else
     if [[ "$SYSTEM" -eq 1 ]]; then

@@ -45,6 +45,20 @@
 
 6. **扫码登录**：运行 `wx-bot login <binding>`（`<binding>` 是配置里 `bindings[0].name`，示例配置为 `xiaox`），把二维码展示给用户，让用户用微信扫码。二维码约 2 分钟过期，过期会自动换新码，10 分钟内没扫码就退出（`--timeout` 可调）。
 
-7. **启动**：按 `install.sh` 输出的命令加载 systemd / launchd 服务；或直接运行 `wx-bot run`。按 [AGENTS.md 通用规则](../../AGENTS.md#通用规则)用 `wx-bot health --grace 0` 确认能收到消息。
+7. **启动，并设为开机自启**
 
-8. **告诉用户**：先用自己的微信给 ClawBot 发一条消息，之后就能对话。
+   ```bash
+   systemctl --user enable --now wx-bot
+   loginctl enable-linger "$(id -un)"        # 用户服务开机就启动，不用等登录
+   loginctl show-user "$(id -un)" -p Linger   # 应显示 Linger=yes
+   ```
+
+   `install.sh --service` 已尝试开启 linger；上面再确认一次。没有 `systemctl --user` 的环境跳过这一步，由下一步的保活任务负责启动。然后按 [AGENTS.md 通用规则](../../AGENTS.md#通用规则)用 `wx-bot health --grace 0` 确认能收到消息。
+
+8. **建保活 routine**：云电脑可能被重启或恢复，服务不一定自己回来。再建一个 routine，名称如「wx-bot 保活」，触发方式选**定时、每 10 分钟**，指令写：
+
+   > 运行 `~/.local/bin/wx-bot-keepalive`（不存在就先执行 `curl -fsSL https://raw.githubusercontent.com/lawrencewzen/wx-bot/main/deploy/keepalive.sh -o ~/.local/bin/wx-bot-keepalive && chmod 0755 ~/.local/bin/wx-bot-keepalive`）。输出 `ok` 或 `restarted: …` 时什么都不用说，静默结束；输出 `NEED_USER: …` 时，把后面的原因翻译成中文，在聊天里告诉用户并说明怎么处理（例如登录过期就请用户重新扫码）。
+
+   这个脚本会：wx-bot 没在运行就用保存的登录状态重新启动（**不需要重新扫码**），程序文件丢了就自动重装，只有登录过期、代理失效这类它修不好的问题才输出 `NEED_USER`。
+
+9. **告诉用户**：先用自己的微信给 ClawBot 发一条消息，之后就能对话。
