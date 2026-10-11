@@ -14,6 +14,14 @@ ENVFILE="${HOME}/.config/wx-bot/env"
 LOG="${HOME}/.local/state/wx-bot/run.log"
 INSTALL_URL="https://raw.githubusercontent.com/lawrencewzen/wx-bot/main/install.sh"
 
+# The config may reference env: variables (e.g. WXBOT_WEBHOOK_KEY) that only
+# the env file sets; every wx-bot command below needs them to load the config.
+if [ -f "$ENVFILE" ]; then
+	set -a
+	. "$ENVFILE"
+	set +a
+fi
+
 if [ ! -x "$WXBOT" ]; then
 	if ! curl -fsSL "$INSTALL_URL" | bash >/dev/null 2>&1 || [ ! -x "$WXBOT" ]; then
 		echo "NEED_USER: wx-bot 程序不见了，自动重装失败（${INSTALL_URL}）"
@@ -21,9 +29,19 @@ if [ ! -x "$WXBOT" ]; then
 	fi
 fi
 
-if "$WXBOT" health --liveness >/dev/null 2>&1; then
-	how=""
-else
+live="$("$WXBOT" health --liveness 2>&1)"
+live_rc=$?
+how=""
+if [ "$live_rc" -ne 0 ]; then
+	# Restart only when wx-bot run is really down. Any other failure (bad
+	# config, missing env var) would kill a working process; report it instead.
+	case "$live" in
+	*"is not running"* | *stalled*) ;;
+	*)
+		echo "NEED_USER: wx-bot health 无法运行：$(printf '%s' "$live" | head -1)"
+		exit 1
+		;;
+	esac
 	# Prefer the service manager; fall back to a detached process with the env file.
 	if command -v systemctl >/dev/null 2>&1 && systemctl --user cat wx-bot >/dev/null 2>&1 &&
 		systemctl --user restart wx-bot >/dev/null 2>&1; then
@@ -32,9 +50,6 @@ else
 		pkill -f "wx-bot.* run$" 2>/dev/null
 		mkdir -p "$(dirname "$LOG")"
 		(
-			set -a
-			[ -f "$ENVFILE" ] && . "$ENVFILE"
-			set +a
 			if command -v setsid >/dev/null 2>&1; then
 				setsid nohup "$WXBOT" run >>"$LOG" 2>&1 </dev/null &
 			else

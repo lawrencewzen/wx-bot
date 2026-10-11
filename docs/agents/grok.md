@@ -53,7 +53,7 @@
    loginctl show-user "$(id -un)" -p Linger   # 应显示 Linger=yes
    ```
 
-   `install.sh --service` 已尝试开启 linger；上面再确认一次。没有 `systemctl --user` 的环境跳过这一步，由下一步的保活任务负责启动。然后按 [AGENTS.md 通用规则](../../AGENTS.md#通用规则)用 `wx-bot health --grace 0` 确认能收到消息。
+   `install.sh --service` 已尝试开启 linger；上面再确认一次。如果报 `System has not been booted with systemd` 或没有 `systemctl`（不少云电脑如此），跳过上面三行，改为直接运行 `~/.local/bin/wx-bot-keepalive` 启动 wx-bot；开机后的启动由下一步的保活任务负责。然后按 [AGENTS.md 通用规则](../../AGENTS.md#通用规则)用 `wx-bot health --grace 0` 确认能收到消息。
 
 8. **建保活 routine**：云电脑可能被重启或恢复，服务不一定自己回来。再建一个 routine，名称如「wx-bot 保活」，触发方式选**定时、每 10 分钟**，指令写：
 

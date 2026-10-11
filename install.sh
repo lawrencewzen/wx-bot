@@ -222,8 +222,12 @@ if [[ "$SERVICE" -eq 1 ]]; then
       systemctl --user daemon-reload || true
       [[ -z "$OLD_VERSION" ]] && echo "enable with: systemctl --user enable --now wx-bot"
     fi
-    # A user service only starts at boot when lingering is on.
-    if command -v loginctl >/dev/null 2>&1; then
+    # A user service only starts at boot when lingering is on. Without systemd
+    # as init (common on agent cloud computers) neither works: use keepalive.
+    if [[ ! -d /run/systemd/system ]]; then
+      echo "this machine was not booted with systemd: the unit above will not run."
+      echo "start wx-bot with ${BINDIR}/wx-bot-keepalive and schedule it every 10 minutes."
+    elif command -v loginctl >/dev/null 2>&1; then
       if loginctl enable-linger "$(id -un)" 2>/dev/null; then
         echo "lingering enabled: the user service starts at boot"
       else
