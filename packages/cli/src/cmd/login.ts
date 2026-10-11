@@ -1,5 +1,6 @@
 import { LoginApi, QR_LIFETIME_MS } from "@wx-bot/core";
-import { rmSync } from "node:fs";
+import { readdirSync, rmSync } from "node:fs";
+import { basename, dirname, extname, join } from "node:path";
 import QRCode from "qrcode";
 import { findBinding, loadConfig } from "../config.ts";
 import { formatDuration, parseDuration } from "../duration.ts";
@@ -10,11 +11,30 @@ import { Store } from "../state.ts";
 const SPEC = {
   "qr-png": {
     type: "string",
-    usage: "also write the QR code as a PNG to this path (for agents that send it as an image); removed when login ends",
+    usage: "also write each QR code as a PNG: qr.png -> qr-1.png, qr-2.png, ... (for agents that send it as an image); removed when login ends",
     default: "",
   },
   timeout: { type: "string", usage: "give up if not scanned within this time; a new QR is shown every ~2m", default: "10m0s" },
 } as const;
+
+/**
+ * One file per QR: chat apps may show an attachment by reading its path later,
+ * so a reused path would make earlier messages show a different (newer) code.
+ */
+export function qrPngPath(base: string, n: number): string {
+  const ext = extname(base) || ".png";
+  return join(dirname(base), `${basename(base, extname(base))}-${n}${ext}`);
+}
+
+/** Remove base and every base-<n> PNG next to it. */
+function removeQrPngs(base: string) {
+  rmSync(base, { force: true });
+  const ext = extname(base) || ".png";
+  const re = new RegExp(`^${basename(base, extname(base)).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-\\d+${ext.replace(".", "\\.")}$`);
+  try {
+    for (const f of readdirSync(dirname(base))) if (re.test(f)) rmSync(join(dirname(base), f), { force: true });
+  } catch {}
+}
 
 /** UTC timestamp without milliseconds, e.g. 2026-10-10T14:41:05Z. */
 const utc = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -48,7 +68,7 @@ export async function cmdLogin(configPath: string, args: string[]): Promise<numb
   if (!b) return console.error(`wx-bot: unknown binding "${name}"`), 1;
 
   // A PNG left over from an earlier run is already expired; never let it be sent.
-  const removePng = () => qrPng && rmSync(qrPng, { force: true });
+  const removePng = () => qrPng && removeQrPngs(qrPng);
   removePng();
 
   const ctl = new AbortController();
@@ -68,8 +88,9 @@ export async function cmdLogin(configPath: string, args: string[]): Promise<numb
       console.log(qr.imageContent);
       if (qrPng) {
         try {
-          writeAtomic(qrPng, await QRCode.toBuffer(qr.imageContent, { type: "png", errorCorrectionLevel: "M", scale: 8, margin: 4 }));
-          console.log(`QR PNG: ${qrPng}`);
+          const path = qrPngPath(qrPng, attempt);
+          writeAtomic(path, await QRCode.toBuffer(qr.imageContent, { type: "png", errorCorrectionLevel: "M", scale: 8, margin: 4 }));
+          console.log(`QR PNG: ${path}`);
         } catch (err) {
           console.error(`wx-bot login: write qr png: ${(err as Error).message}`);
         }
