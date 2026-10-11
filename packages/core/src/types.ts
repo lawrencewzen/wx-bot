@@ -17,10 +17,15 @@ export const UploadMediaType = {
   Voice: 4,
 } as const;
 
-export const CHANNEL_VERSION = "2.1.7";
+/** Mirrors the official @tencent-weixin/openclaw-weixin release we track. */
+export const CHANNEL_VERSION = "2.4.10";
 export const ILINK_APP_ID = "bot";
-/** ((2 & 0xff) << 16) | ((1 & 0xff) << 8) | (7 & 0xff) */
-export const ILINK_CLIENT_VERSION = 131335;
+/** ((2 & 0xff) << 16) | ((4 & 0xff) << 8) | (10 & 0xff) */
+export const ILINK_CLIENT_VERSION = 132106;
+/** base_info.bot_agent; the official plugin's default when the app declares none. */
+export const BOT_AGENT = "OpenClaw";
+/** base_info sent with every authenticated API request. */
+export const BASE_INFO = { channel_version: CHANNEL_VERSION, bot_agent: BOT_AGENT } as const;
 /** WeChat text limit per message, counted in code points. */
 export const MAX_TEXT_RUNES = 2000;
 export const MAX_MEDIA_BYTES = 100 * 1024 * 1024;

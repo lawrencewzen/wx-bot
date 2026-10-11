@@ -4,7 +4,7 @@ import { appHeaders } from "./headers.ts";
 import { parseIlinkJson } from "./json.ts";
 import { baseName, splitText } from "./text.ts";
 import {
-  CHANNEL_VERSION,
+  BASE_INFO,
   DEFAULT_CDN_BASE,
   ERR_CODE_EXPIRED,
   ItemType,
@@ -81,7 +81,7 @@ export class IlinkClient {
       const resp = await this.fetch(`${this.baseUrl}/ilink/bot/getupdates`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...appHeaders(this.token) },
-        body: JSON.stringify({ get_updates_buf: cursor, base_info: { channel_version: CHANNEL_VERSION } }),
+        body: JSON.stringify({ get_updates_buf: cursor, base_info: BASE_INFO }),
         signal: ctl.signal,
       });
       if (resp.status !== 200) throw new Error(`getupdates: status ${resp.status}`);
@@ -156,7 +156,7 @@ export class IlinkClient {
         context_token: this.contextTokens.get(wxid) ?? "",
         item_list: [item],
       },
-      base_info: { channel_version: CHANNEL_VERSION },
+      base_info: BASE_INFO,
     });
   }
 
@@ -175,7 +175,7 @@ export class IlinkClient {
       filesize: cipherSize,
       no_need_thumb: true,
       aeskey: aesKeyHex,
-      base_info: { channel_version: CHANNEL_VERSION },
+      base_info: BASE_INFO,
     });
     if (resp.ret) throw new WxBotError("upstream", `get upload url: ret=${resp.ret} ${resp.errmsg ?? ""}`.trim());
     let uploadUrl = (resp.upload_full_url ?? "").trim();

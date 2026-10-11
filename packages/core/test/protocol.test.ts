@@ -28,7 +28,7 @@ test("filenames", () => {
 });
 
 test("headers", () => {
-  expect(appIdentityHeaders()).toEqual({ "iLink-App-Id": "bot", "iLink-App-ClientVersion": "131335" });
+  expect(appIdentityHeaders()).toEqual({ "iLink-App-Id": "bot", "iLink-App-ClientVersion": "132106" });
   const h = appHeaders("tok");
   expect(h.Authorization).toBe("Bearer tok");
   expect(h.AuthorizationType).toBe("ilink_bot_token");
