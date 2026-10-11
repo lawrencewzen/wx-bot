@@ -213,7 +213,7 @@ curl -X POST http://127.0.0.1:18790/v1/send \
 
 **Alpine 上跑不起来？** 发布版依赖 glibc，Alpine 等 musl 系统请用 `wx-bot_linux_<arch>_musl`；`install.sh` 会自动选择。
 
-**二维码过期？** 自动刷新最多 3 次，仍失败就重跑 `login`。
+**二维码过期？** 每张码约 2 分钟有效，过期自动换新码；10 分钟内没扫就退出（`--timeout` 可调），重跑 `login` 即可。用 `--qr-png` 时，登录结束后图片会被删除，避免误发过期的旧图。
 
 **要把二维码发给别人扫？** `wx-bot login <binding> --qr-png ./qr.png` 会同时写出 PNG 图片。
 

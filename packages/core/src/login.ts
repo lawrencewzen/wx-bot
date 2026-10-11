@@ -3,6 +3,8 @@ import { appHeaders, appIdentityHeaders } from "./headers.ts";
 import { DEFAULT_AUTH_BASE, type Session } from "./types.ts";
 
 export const QR_MAX_EXPIRY = 3;
+/** Measured: an unscanned QR expires about 2 minutes after it is issued. */
+export const QR_LIFETIME_MS = 120_000;
 const QR_POLL_INTERVAL_MS = 1000;
 
 export class QrExpiredError extends Error {
@@ -126,19 +128,26 @@ export class LoginApi {
     }
   }
 
-  /** Full login: show a QR (attempt is 1-based), refresh up to QR_MAX_EXPIRY times. */
-  async login(onQr: (qr: QrCode, attempt: number) => void | Promise<void>, signal?: AbortSignal): Promise<Session> {
+  /**
+   * Full login: show a QR (attempt is 1-based) and show a new one each time it
+   * expires, up to maxQr codes in total (Infinity: until signal aborts).
+   */
+  async login(
+    onQr: (qr: QrCode, attempt: number) => void | Promise<void>,
+    signal?: AbortSignal,
+    maxQr = QR_MAX_EXPIRY,
+  ): Promise<Session> {
     let qr = await this.getQrCode(signal);
     await onQr(qr, 1);
-    for (let attempt = 1; attempt <= QR_MAX_EXPIRY; attempt++) {
+    for (let attempt = 1; ; attempt++) {
+      signal?.throwIfAborted();
       try {
         return await this.pollQrStatus(qr.qrcode, signal);
       } catch (err) {
-        if (!(err instanceof QrExpiredError) || attempt === QR_MAX_EXPIRY) throw err;
+        if (!(err instanceof QrExpiredError) || attempt >= maxQr) throw err;
         qr = await this.getQrCode(signal);
         await onQr(qr, attempt + 1);
       }
     }
-    throw new QrExpiredError();
   }
 }

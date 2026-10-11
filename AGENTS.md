@@ -69,7 +69,7 @@
    - `~/.config/wx-bot/config.json`：`bindings[0].webhook.url` 填用户给的 URL，`key` 保持 `env:WXBOT_WEBHOOK_KEY`。不用签名时**删掉 `secret` 这一行**，否则环境变量未设置会导致启动失败。
    - `~/.config/wx-bot/env`：写入 `WXBOT_WEBHOOK_KEY=<key>`（格式 `KEY=value`，不加 `export`）。
 
-6. **扫码登录**：运行 `wx-bot login <binding>`（`<binding>` 是配置里 `bindings[0].name`，示例配置为 `xiaox`），把二维码展示给用户，让用户用微信扫码。二维码过期会自动刷新最多 3 次。
+6. **扫码登录**：运行 `wx-bot login <binding>`（`<binding>` 是配置里 `bindings[0].name`，示例配置为 `xiaox`），把二维码展示给用户，让用户用微信扫码。二维码约 2 分钟过期，过期会自动换新码，10 分钟内没扫码就退出（`--timeout` 可调）。
 
 7. **启动**：按 `install.sh` 输出的命令加载 systemd / launchd 服务；或直接运行 `wx-bot run`。按本文开头的规则用 `wx-bot health --grace 0` 确认能收到消息。
 
@@ -106,15 +106,20 @@ wx-bot 跑在**你自己的运行环境**里（不是用户的 Mac），作为 s
    mv "$f.new" "$f" && chmod 0600 "$f"
    ```
 
-3. **扫码登录**：二维码要以**图片**发给用户。
+3. **扫码登录**：二维码要以**图片**发给用户。**每张码只有约 2 分钟有效**，务必生成后立刻发。
 
    ```bash
-   nohup ~/.local/bin/wx-bot login muse --qr-png ~/wx-bot-qr.png > ~/wx-bot-login.log 2>&1 &
+   pkill -f "wx-bot login" 2>/dev/null; rm -f ~/wx-bot-qr.png
+   setsid nohup ~/.local/bin/wx-bot login muse --qr-png ~/wx-bot-qr.png --timeout 10m \
+     > ~/wx-bot-login.log 2>&1 < /dev/null &
    ```
 
-   - 等 `~/wx-bot-qr.png` 生成后，把这张图片发到聊天里，告诉用户：「用微信扫这个二维码，并在手机上确认登录」。
-   - 读 `~/wx-bot-login.log`，出现 `login ok` 即成功。日志出现「二维码已过期」时图片已被覆盖，重新发送新图片。
-   - 登录成功后删除 `~/wx-bot-qr.png`。
+   `setsid` 让登录进程脱离当前命令，不会在命令结束后被清理掉。登录进程会一直等 10 分钟，每张码过期就换一张，日志里每张码一行：`QR #1 id=... generated_at=... expires_at=...`（UTC 时间）。
+
+   - **日志里出现新的 `QR #n` 行，立刻把 `~/wx-bot-qr.png` 发到聊天里**，中间不要做别的事。告诉用户：「用微信扫这个二维码并在手机上确认，约 2 分钟内有效」。
+   - 同一个 `QR #n` 只发一次。之后继续盯日志：出现 `QR #n+1` 说明上一张已过期，立即发新图；出现 `login ok` 即成功。
+   - **发图前先确认登录进程还在**：`pgrep -f "wx-bot login"` 有输出，且 `~/wx-bot-qr.png` 存在。登录进程一结束（成功、超时或被杀）图片就会被删除，所以图片不存在就**不要**发任何旧图，看日志最后一行：`login ok` 是成功；`not scanned within 10m0s` 是超时，等用户说准备好了再重新执行上面的命令；其他情况直接重新执行。
+   - 用户说「过期了」：看日志最新的 `QR #n` 和进程是否还在，按上面两条发新图或重启登录，不要重发同一张。
 
 4. **常驻服务**：取 [`adapters/muse/wx-bot.service`](adapters/muse/wx-bot.service)，把 `__HOME__` 换成 home 的绝对路径、`__USER__` 换成该目录的属主，安装为 `/etc/systemd/system/wx-bot.service`，然后：
 

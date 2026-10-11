@@ -73,3 +73,20 @@ test("expired QR refreshes, bare redirect host gets https", async () => {
   await expect(expiring.login(() => {})).rejects.toThrow("expired");
   expect(qrs).toBe(3);
 });
+
+test("maxQr Infinity keeps refreshing until aborted", async () => {
+  let qrs = 0;
+  const api = new LoginApi({
+    authBase: "https://auth.example",
+    fetch: async (input) =>
+      String(input).includes("get_bot_qrcode") ? (qrs++, Response.json({ qrcode: `q${qrs}` })) : Response.json({ status: "expired" }),
+  });
+  const ctl = new AbortController();
+  const shown: number[] = [];
+  const p = api.login((_, n) => {
+    shown.push(n);
+    if (n === 5) ctl.abort(new Error("timeout"));
+  }, ctl.signal, Infinity);
+  await expect(p).rejects.toThrow();
+  expect(shown).toEqual([1, 2, 3, 4, 5]);
+});
