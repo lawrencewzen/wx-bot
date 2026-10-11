@@ -8,13 +8,18 @@ export function mkdir0700(path: string): void {
   chmodSync(path, 0o700);
 }
 
-/** Write via temp file + rename, mode 0600. */
-export function writeAtomic(path: string, data: string | Uint8Array): void {
+/**
+ * Write via temp file + rename. Defaults suit private state: mode 0600 in a
+ * directory forced to 0700. For files meant to be shared (mode 0644) the
+ * directory is created if missing but its mode is left alone.
+ */
+export function writeAtomic(path: string, data: string | Uint8Array, mode = 0o600): void {
   const dir = dirname(path);
-  mkdir0700(dir);
+  if (mode === 0o600) mkdir0700(dir);
+  else if (dir && dir !== ".") mkdirSync(dir, { recursive: true });
   const tmp = join(dir, `.tmp-${randomBytes(6).toString("hex")}`);
   try {
-    const fd = openSync(tmp, "wx", 0o600);
+    const fd = openSync(tmp, "wx", mode);
     try {
       writeSync(fd, typeof data === "string" ? Buffer.from(data) : data);
       fsyncSync(fd);
@@ -22,7 +27,7 @@ export function writeAtomic(path: string, data: string | Uint8Array): void {
       closeSync(fd);
     }
     renameSync(tmp, path);
-    chmodSync(path, 0o600);
+    chmodSync(path, mode);
   } catch (err) {
     rmSync(tmp, { force: true });
     throw err;

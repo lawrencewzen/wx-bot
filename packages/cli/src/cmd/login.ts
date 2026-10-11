@@ -89,7 +89,8 @@ export async function cmdLogin(configPath: string, args: string[]): Promise<numb
       if (qrPng) {
         try {
           const path = qrPngPath(qrPng, attempt);
-          writeAtomic(path, await QRCode.toBuffer(qr.imageContent, { type: "png", errorCorrectionLevel: "M", scale: 8, margin: 4 }));
+          // 0644 and the directory untouched: a chat app serving the file may run as another user.
+          writeAtomic(path, await QRCode.toBuffer(qr.imageContent, { type: "png", errorCorrectionLevel: "M", scale: 8, margin: 4 }), 0o644);
           console.log(`QR PNG: ${path}`);
         } catch (err) {
           console.error(`wx-bot login: write qr png: ${(err as Error).message}`);
