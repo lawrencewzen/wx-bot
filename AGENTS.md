@@ -9,6 +9,7 @@
 | Pi Durable 或其他有 HTTP 入口的 Agent Runtime | webhook | [`docs/integrations/pi-durable.md`](https://github.com/lawrencewzen/wx-bot/blob/main/docs/integrations/pi-durable.md) |
 | 其他 | 自选 | [`docs/protocol.md`](https://github.com/lawrencewzen/wx-bot/blob/main/docs/protocol.md) |
 | **已经装过，用户让你升级 wx-bot** | — | [`docs/agents/upgrade.md`](https://github.com/lawrencewzen/wx-bot/blob/main/docs/agents/upgrade.md) |
+| **用户让你卸载，或删掉重装** | — | [`docs/agents/uninstall.md`](https://github.com/lawrencewzen/wx-bot/blob/main/docs/agents/uninstall.md) |
 | **已经装过，用户说收不到微信消息** | — | [`docs/agents/troubleshoot.md`](https://github.com/lawrencewzen/wx-bot/blob/main/docs/agents/troubleshoot.md) |
 
 链接是完整网址；如果你已经 clone 了仓库，直接读仓库里同一路径的文件即可。

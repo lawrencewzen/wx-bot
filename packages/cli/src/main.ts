@@ -6,6 +6,7 @@ import { cmdLogin } from "./cmd/login.ts";
 import { cmdRun } from "./cmd/run.ts";
 import { cmdSend } from "./cmd/send.ts";
 import { cmdStatus } from "./cmd/status.ts";
+import { cmdUninstall } from "./cmd/uninstall.ts";
 import { cmdUpdate } from "./cmd/update.ts";
 import { FlagError, parseFlags, usageLines } from "./flags.ts";
 import { setLevel } from "./log.ts";
@@ -32,6 +33,7 @@ Commands:
   status            Show per-binding login / poll / delivery / inbox state
   health            Exit 1 with a hint if a binding cannot receive messages
   update            Upgrade to the latest release (see wx-bot update -h)
+  uninstall         Remove wx-bot (prints the plan; --yes to do it)
   version           Print version
 
 Flags:
@@ -75,6 +77,8 @@ async function main(argv: string[]): Promise<number> {
       return cmdInbox(path, rest);
     case "health":
       return cmdHealth(path, rest);
+    case "uninstall":
+      return cmdUninstall(path, rest);
     case "help":
     case "-h":
     case "--help":

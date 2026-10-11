@@ -207,6 +207,8 @@ curl -X POST http://127.0.0.1:18790/v1/send \
 
 **wx-bot 出问题会通知谁？** 连不上微信超过 2 分钟、登录过期、恢复时，wx-bot 往 Agent 投一条 `kind: "alert"` 事件，由 Agent 在它自己的聊天里告诉你；反过来，Agent 超过 10 分钟没处理排队的消息时，wx-bot 直接用微信提醒你。详见 [协议 2.1](docs/protocol.md#21-异常通知kind-alert)。
 
+**怎么卸载 / 重装？** `wx-bot uninstall` 先列出会删除的内容，`wx-bot uninstall --yes` 执行；加 `--keep-data` 保留登录状态，重装不用扫码。让 Agent 卸载时它会按 [docs/agents/uninstall.md](docs/agents/uninstall.md) 做，同时删掉它那边的 hook / routine。
+
 **云电脑重启后 wx-bot 会自己恢复吗？** 会。Linux 上 `install.sh --service` 会开启 `loginctl enable-linger`，用户服务随开机启动；Muse 用的是系统服务，`systemctl enable` 后同样开机启动。Grok 另建一个每 10 分钟运行 `wx-bot-keepalive` 的保活 routine 兜底：没在运行就用保存的登录状态拉起，不用重新扫码。
 
 **微信发了消息，Agent 一直没收到？** 先跑 `wx-bot health --grace 0`，它会说明是服务没在运行、登录过期，还是连不上微信。云电脑只能通过代理出网时，systemd 服务默认不带 shell 里的 `https_proxy` 等变量，要写进 `~/.config/wx-bot/env` 后重启服务（Linux 上 `install.sh` 会自动写入）。
