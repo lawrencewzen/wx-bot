@@ -175,7 +175,9 @@ wx-bot 跑在**你自己的运行环境**里（不是用户的 Mac），作为 s
 
    两种方式都会自动选对文件（含 musl）、校验 sha256、替换程序，并重启正在运行的 systemd / launchd 服务。输出里出现 `restart it` 时，按提示手动重启（例如 Muse 的系统服务需要 `sudo systemctl restart wx-bot`）。
 2. **确认**：`wx-bot version` 是新版本；等 15 秒后 `wx-bot health --grace 0` 退出码为 0。
-3. **更新回复指令**：你的 routine 或 hook 指令里如果回复写的是 `--text '<回复>'`，改成 `--text -` 加带引号的 heredoc（见本文开头），引号就不用再手动转义。
+3. **更新 routine / hook 指令**：
+   - 回复如果写的是 `--text '<回复>'`，改成 `--text -` 加带引号的 heredoc（见本文开头），引号就不用再手动转义。
+   - 加上 alert 事件的处理（v0.4.4 起）：`kind` 为 `alert` 时把 `alert.message` 和 `alert.hint` 在你自己的聊天里告诉用户，不要回微信。Grok 按 [Grok Bot](#grok-bot) 第 2 步最后一条改 routine 指令；Muse 按下一步。
 4. **Muse 还要更新 hook**：对照 [`adapters/muse/wechat-hook.sh`](adapters/muse/wechat-hook.sh) 和 [Muse](#muse) 第 5、6 步，确认你的 hook 在没有新事件时会运行 `wx-bot health --liveness`、异常时唤醒你，`poll_interval_secs` 为 5，且唤醒指令里包含第 6 步的 A、B 两种情况。没有就改上，先 dry run 再启用。
 5. **告诉用户**：从哪个版本升级到哪个版本，并请用户发一条微信确认能正常对话。
 
