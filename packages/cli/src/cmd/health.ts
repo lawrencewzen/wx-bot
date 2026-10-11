@@ -4,16 +4,19 @@ import { FlagError, parseFlags } from "../flags.ts";
 import { ago, describePoll, proxyFromEnv } from "../health.ts";
 import { statusOf, type BindingStatus } from "./status.ts";
 
-const USAGE = `usage: wx-bot health [--binding B] [--grace 2m]
+const USAGE = `usage: wx-bot health [--binding B] [--grace 2m] [--liveness]
 
 Checks that wx-bot run is receiving WeChat messages. Prints one line per
 binding; exits 1 if any binding is unhealthy (with a hint), 0 otherwise.
 Connection errors shorter than --grace count as healthy (still retrying).
+--liveness only checks that wx-bot run is up and polling; connection errors
+and expired logins are left to the alert events wx-bot run sends the agent.
 `;
 
 const SPEC = {
   binding: { type: "string", usage: "binding to check (default: all)", default: "" },
   grace: { type: "string", usage: "how long poll errors are tolerated before reporting unhealthy", default: "2m0s" },
+  liveness: { type: "bool", usage: "only report a stopped or stuck wx-bot run", default: false },
 } as const;
 
 export interface Verdict {
@@ -25,8 +28,13 @@ export interface Verdict {
  * Judge one binding. shellProxy is the proxy of the calling shell, compared
  * with the one the run process uses to spot a service started without it.
  */
-export function judge(st: BindingStatus, graceMs: number, shellProxy: string): Verdict {
+export function judge(st: BindingStatus, graceMs: number, shellProxy: string, liveness = false): Verdict {
   const n = st.name;
+  if (liveness) {
+    if (st.expired || !st.logged_in) return { ok: true, line: `${n}: ${st.expired ? "login expired" : "not logged in"} (not a liveness problem)` };
+    if (st.poll.state === "not_running" || st.poll.state === "stalled") return judge(st, graceMs, shellProxy);
+    return { ok: true, line: `${n}: running (${describePoll(st.poll)})` };
+  }
   if (st.expired) return { ok: false, line: `${n}: login expired; run \`wx-bot login ${n}\`, then restart the service` };
   if (!st.logged_in) return { ok: false, line: `${n}: not logged in; run \`wx-bot login ${n}\`, then restart the service` };
   const p = st.poll;
@@ -77,7 +85,7 @@ export async function cmdHealth(configPath: string, args: string[]): Promise<num
   const shellProxy = proxyFromEnv();
   let healthy = true;
   for (const b of bindings) {
-    const v = judge(statusOf(cfg, b), graceMs, shellProxy);
+    const v = judge(statusOf(cfg, b), graceMs, shellProxy, parsed.values.liveness);
     healthy &&= v.ok;
     console.log(v.line);
   }

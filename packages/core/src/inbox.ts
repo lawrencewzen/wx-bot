@@ -148,6 +148,25 @@ export class Inbox {
     return row?.n ?? 0;
   }
 
+  /**
+   * Message events of binding that are ready but were queued before
+   * olderThanMs ago: nobody is taking them. Leased events (being handled)
+   * and alerts do not count.
+   */
+  waiting(binding: string, olderThanMs: number): number {
+    const now = this.now();
+    const [row] = this.sql.all<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM events
+       WHERE state = ? AND binding = ? AND lease_until <= ? AND created_at <= ? AND event_id NOT LIKE ?`,
+      STATE_PENDING,
+      binding,
+      now,
+      now - olderThanMs,
+      `${binding}:alert:%`,
+    );
+    return row?.n ?? 0;
+  }
+
   /** Pending (including leased) and dead totals for one binding. */
   stats(binding: string): InboxCounts {
     const [row] = this.sql.all<{ pending: number | null; dead: number | null }>(

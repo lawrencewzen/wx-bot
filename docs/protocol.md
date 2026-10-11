@@ -28,6 +28,7 @@ wx-bot 收到微信消息后，先写入本地收件箱，写成功才推进 iLi
   "schema": "wxbot.event.v1",
   "event_id": "xiaox:1001",
   "binding": "xiaox",
+  "kind": "message",
   "message_id": "1001",
   "from_wxid": "wxid_xxx",
   "to_bot_id": "bot_xxx",
@@ -48,6 +49,7 @@ wx-bot 收到微信消息后，先写入本地收件箱，写成功才推进 iLi
 | `schema` | string | 固定为 `wxbot.event.v1` |
 | `event_id` | string | `<binding>:<message_id>`，全局唯一；去重和 ack 都用它 |
 | `binding` | string | 收到消息的绑定名，回复时原样传回 |
+| `kind` | string | `message`（微信消息）或 `alert`（wx-bot 异常通知，见 2.1）。旧版事件没有此字段，按 `message` 处理 |
 | `message_id` | string | 微信消息 ID，十进制数字字符串 |
 | `from_wxid` | string | 发送者，回复时作为 `to` |
 | `to_bot_id` | string | 机器人账号 ID |
@@ -62,6 +64,39 @@ wx-bot 收到微信消息后，先写入本地收件箱，写成功才推进 iLi
 | `reply_hint` | string | 回复命令示例，方便 LLM 直接参考 |
 
 `text`、`voice_text`、`media` 可能同时为空（微信的空事件），Agent 应直接忽略并视为处理成功。
+
+### 2.1 异常通知（`kind: "alert"`）
+
+wx-bot 自身出问题时，会往同一条投递通道（webhook 或 pull）放一条 alert 事件，让 Agent 告诉用户：
+
+```json
+{
+  "schema": "wxbot.event.v1",
+  "event_id": "xiaox:alert:ilink_unreachable:1760000000",
+  "binding": "xiaox",
+  "kind": "alert",
+  "message_id": "", "from_wxid": "", "to_bot_id": "bot_xxx", "create_time": 1760000130,
+  "text": "", "media": [], "has_context_token": false, "reply_hint": "",
+  "alert": {
+    "code": "ilink_unreachable",
+    "message": "wx-bot 连不上微信已超过 2 分钟，暂时收不到微信消息：Unable to connect",
+    "hint": "如果这台机器要通过代理上网，把 https_proxy 等代理变量写进 ~/.config/wx-bot/env 后重启 wx-bot 服务；否则检查网络。",
+    "since": 1760000000
+  }
+}
+```
+
+| `alert.code` | 何时发出 |
+| --- | --- |
+| `ilink_unreachable` | 连续连不上微信超过 2 分钟（每次断线只发一条） |
+| `recovered` | 发过 `ilink_unreachable` 之后恢复连接 |
+| `session_expired` | 微信登录过期，需要重新扫码 |
+
+- Agent 收到后：把 `alert.message` 和 `alert.hint` 用自己的话告诉用户（在 Agent 自己的聊天里，**不要**用 `wx-bot send` 发微信：此时微信通常不可用），然后照常 ack / 返回 2xx。
+- alert 的 `text`、`media` 为空，只认识消息的旧版 Agent 会把它当空事件忽略，不会出错。
+- 局限：webhook 和微信走同一个网络出口时（例如代理失效），alert 可能要等网络恢复才送达。
+
+反方向：如果 Agent 那边**超过 10 分钟没处理**排队的消息（webhook 一直失败、pull 没人来取），wx-bot 会直接用微信给登录账号的主人发一条提醒，恢复后再发一条「已恢复」。
 
 ## 3. 投递方式
 
@@ -222,6 +257,7 @@ image=@a.jpg   或 file=@a.pdf   或 video=@a.mp4   （最多一个文件，≤ 
 - [ ] pull：处理完每个事件后 ack；处理可能很慢时加大 `lease`
 - [ ] 按 `event_id` 去重
 - [ ] 忽略空事件
+- [ ] `kind` 为 `alert` 时把 `alert.message` / `alert.hint` 告诉用户（不要回微信）
 - [ ] 回复时 `binding` 原样传回，`to` 使用 `from_wxid`
 - [ ] 按第 5 节状态码处理失败，401 / 409 不盲目重试
 - [ ] 回复去掉 Markdown

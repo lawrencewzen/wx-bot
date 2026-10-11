@@ -1,4 +1,18 @@
-import { createApiHandler, deliverNext, Poller, sendMessage, type Inbox, type SendRequest } from "@wx-bot/core";
+import {
+  AGENT_RECOVERED_TEXT,
+  AGENT_STALL_MS,
+  agentStalledText,
+  buildAlertEvent,
+  createApiHandler,
+  deliverNext,
+  encodeEvent,
+  PollAlerts,
+  Poller,
+  sendMessage,
+  type AlertInfo,
+  type Inbox,
+  type SendRequest,
+} from "@wx-bot/core";
 import { DELIVERY_WEBHOOK, inboxPath, loadConfig, type Config } from "../config.ts";
 import { mkdir0700 } from "../fsutil.ts";
 import { HealthWriter, healthPath } from "../health.ts";
@@ -12,6 +26,7 @@ import { statusAll } from "./status.ts";
 /** How long finished events are kept, and how long a pending one may wait. */
 const INBOX_RETENTION_MS = 7 * 86_400_000;
 const DELIVER_IDLE_MS = 1000;
+const STALL_CHECK_MS = 30_000;
 
 const sleep = (ms: number, signal: AbortSignal, wake?: (fn: () => void) => () => void) =>
   new Promise<void>((resolve) => {
@@ -80,6 +95,15 @@ export async function cmdRun(configPath: string, args: string[]): Promise<number
     const plog = logger({ component: "poller", binding: b.name });
     const health = new HealthWriter(healthPath(cfg.state_dir, b.name));
     if (health.proxy) plog("info", "using proxy", { proxy: health.proxy });
+    const alerts = new PollAlerts();
+    const queueAlert = (info: AlertInfo) => {
+      try {
+        const ev = buildAlertEvent(b.name, lb.client.botId, info, Date.now());
+        if (box.add(b.name, ev.event_id, encodeEvent(ev))) plog("warn", "alert queued for the agent", { code: info.code });
+      } catch (err) {
+        plog("error", "queue alert", { err: (err as Error).message });
+      }
+    };
     const poller = new Poller({
       binding: b.name,
       client: lb.client,
@@ -89,15 +113,39 @@ export async function cmdRun(configPath: string, args: string[]): Promise<number
       allow: lb.allow,
       forwardUnallowed: b.forward_unallowed,
       log: (level, msg) => plog(level, msg),
-      onHealth: (h) => health.update(h),
+      onHealth: (h) => {
+        health.update(h);
+        const a = alerts.update(h);
+        if (a?.kind === "failing") {
+          queueAlert({
+            code: "ilink_unreachable",
+            message: `wx-bot 连不上微信已超过 2 分钟，暂时收不到微信消息：${a.error}`,
+            hint: health.proxy
+              ? `wx-bot 使用代理 ${health.proxy}：检查 ~/.config/wx-bot/env 里的代理地址和密码是否仍有效，改完重启 wx-bot 服务。`
+              : "如果这台机器要通过代理上网，把 https_proxy 等代理变量写进 ~/.config/wx-bot/env 后重启 wx-bot 服务；否则检查网络。",
+            since: a.since,
+          });
+        } else if (a?.kind === "recovered") {
+          queueAlert({ code: "recovered", message: "wx-bot 已恢复连接微信，断线期间的消息会陆续补收。", hint: "", since: a.since });
+        }
+      },
     });
     plog("info", "poller start");
     tasks.push(
       poller.run(ctl.signal).then((exit) => {
         health.close();
         plog("info", "poller stop", { reason: exit });
+        if (exit === "expired") {
+          queueAlert({
+            code: "session_expired",
+            message: "微信登录已过期，wx-bot 收不到也发不出微信消息。",
+            hint: `在 wx-bot 所在机器运行 wx-bot login ${b.name} 重新扫码，然后重启 wx-bot 服务。`,
+            since: Math.floor(Date.now() / 1000),
+          });
+        }
       }),
     );
+    tasks.push(stallWatch(box, lb, ctl.signal));
   }
 
   tasks.push(pruneLoop(box, ctl.signal));
@@ -154,6 +202,33 @@ async function webhookWorker(box: Inbox, binding: string, cfg: Config, signal: A
       out = "idle";
     }
     if (out === "idle") await sleep(DELIVER_IDLE_MS, signal, (fn) => box.onAdd(fn));
+  }
+}
+
+/**
+ * Tell the WeChat owner when queued messages sit untaken for AGENT_STALL_MS
+ * (agent down, webhook failing), and again when they move.
+ */
+async function stallWatch(box: Inbox, lb: LiveBinding, signal: AbortSignal) {
+  const slog = logger({ component: "stallwatch", binding: lb.name });
+  const owner = lb.session.ilink_user_id;
+  let notified = false;
+  while (!signal.aborted) {
+    try {
+      const n = box.waiting(lb.name, AGENT_STALL_MS);
+      if (n > 0 && !notified && owner) {
+        await lb.client.sendText(owner, agentStalledText(lb.name, n, AGENT_STALL_MS / 60_000));
+        notified = true;
+        slog("warn", "told the owner the agent is not taking messages", { waiting: n });
+      } else if (n === 0 && notified) {
+        notified = false;
+        await lb.client.sendText(owner, AGENT_RECOVERED_TEXT);
+        slog("info", "told the owner the agent recovered");
+      }
+    } catch (err) {
+      slog("warn", "owner notice", { err: (err as Error).message });
+    }
+    await sleep(STALL_CHECK_MS, signal);
   }
 }
 

@@ -69,3 +69,10 @@ test("judge", () => {
   expect(judge(st(failing("http://p:1")), 120_000, "http://p:1").line).toContain("if its credentials changed");
   expect(judge(st(failing("")), 120_000, "").line).toContain("check the network");
 });
+
+test("judge --liveness only flags a stopped or stuck run", () => {
+  expect(judge(st(failing("")), 120_000, "http://p:1", true).ok).toBe(true);
+  expect(judge(st({ state: "ok" }, { expired: true }), 120_000, "", true).ok).toBe(true);
+  expect(judge(st({ state: "not_running" }), 120_000, "", true).ok).toBe(false);
+  expect(judge(st({ state: "stalled", for_ms: 400_000 }), 120_000, "", true).ok).toBe(false);
+});

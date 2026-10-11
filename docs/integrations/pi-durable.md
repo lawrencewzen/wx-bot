@@ -7,7 +7,7 @@ Pi Durable 通过 **webhook** 接收微信消息，通过本地 `POST /v1/send` 
 使用官方镜像，不需要自己克隆源码或打补丁：
 
 ```
-ghcr.io/lawrencewzen/wx-bot:<版本>      # 例如 0.4.0；也有 0.4 和 latest
+ghcr.io/lawrencewzen/wx-bot:<版本>      # 例如 0.4.4；也有 0.4 和 latest
 ```
 
 镜像支持 `linux/amd64`、`linux/arm64`，以非 root 用户 `bot` 运行，`/state` 和 `/media` 为数据卷。配置文件挂载到 `/etc/wx-bot/config.json`。
@@ -51,7 +51,7 @@ services:
 
   wx-bot:
     profiles: ["wechat"]
-    image: ghcr.io/lawrencewzen/wx-bot:0.4.0
+    image: ghcr.io/lawrencewzen/wx-bot:0.4.4
     restart: unless-stopped
     env_file: .env
     depends_on:
@@ -91,7 +91,9 @@ docker compose --profile wechat exec wx-bot wx-bot --config /etc/wx-bot/config.j
 - 每条微信消息先写入 `/state/inbox.db`，写成功才推进 iLink 游标。
 - webhook 返回 2xx 即送达。5xx、超时、网络错误按 2s、4s……最长 5 分钟退避重投，直到成功；返回 400、413、422 时放弃该条。一条失败不阻塞后续消息，容器重启后继续投递。
 - 送达语义是**至少一次**。Pi Durable 现有的 `binding + from_wxid + message_id` 幂等键可以继续用，也可以改用事件里新增的 `event_id`。
-- 入站事件新增 `schema`、`event_id` 字段，原有字段不变。
+- 入站事件新增 `schema`、`event_id`、`kind` 字段，原有字段不变。
+- 从 0.4.4 起，wx-bot 连不上微信（超过 2 分钟）、登录过期、恢复时，会推一条 `kind: "alert"` 事件（`text`、`media` 为空，详情在 `alert.message` / `alert.hint`，见 [协议 2.1](../protocol.md#21-异常通知kind-alert)）。建议 Pi 把它作为系统通知告诉用户，不要回微信。只认识消息的旧逻辑会把它当空事件，**但 alert 的 `from_wxid`、`message_id` 为空，若仍用 `binding + from_wxid + message_id` 做幂等键，多条 alert 会被误判为重复——请改用 `event_id`。**
+- Pi 超过 10 分钟没接收排队的消息时（webhook 一直失败），wx-bot 会用微信直接提醒登录账号的主人。
 
 ## 5. 从「固定提交 + 补丁」迁移
 
@@ -106,7 +108,7 @@ v0.3.0 起，`deploy/wechat/patch_upstream.py` 里的修改都已在上游：
 
 迁移步骤：
 
-1. compose 里 `wx-bot` 服务改用 `image: ghcr.io/lawrencewzen/wx-bot:0.4.0`，删除 `build`。
+1. compose 里 `wx-bot` 服务改用 `image: ghcr.io/lawrencewzen/wx-bot:0.4.4`，删除 `build`。
 2. 配置文件改为挂载（见第 3 节）。
 3. 删除 `deploy/wechat/Dockerfile` 和 `deploy/wechat/patch_upstream.py`。
 4. 现有 `wx-bot-state` 卷可直接沿用，登录状态和游标不丢；`inbox.db` 首次启动时自动创建。若容器内无法写入 `/state`，检查卷内文件属主是否与镜像中的 `bot` 用户一致。

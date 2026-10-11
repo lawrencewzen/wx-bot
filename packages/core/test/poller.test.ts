@@ -111,7 +111,7 @@ test("queues allowed messages with media, skips strangers, saves cursor and toke
   expect(e.media[0]!.type).toBe("image");
   expect(new TextDecoder().decode(t.sink.files.get(e.media[0]!.path))).toBe("fake-jpeg-bytes");
   expect(Object.keys(e)).toEqual([
-    "schema", "event_id", "binding", "message_id", "from_wxid", "to_bot_id", "create_time",
+    "schema", "event_id", "binding", "kind", "message_id", "from_wxid", "to_bot_id", "create_time",
     "text", "voice_text", "media", "has_context_token", "reply_hint",
   ]);
   expect(t.s.tokens).toEqual({ "wxid_owner": "ctx-owner" });

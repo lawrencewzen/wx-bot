@@ -1,6 +1,7 @@
 import type { IlinkClient } from "./client.ts";
 import { fromHex, isHex } from "./crypto.ts";
 import { defaultMediaName, mediaTypeName, sanitizeFilename } from "./text.ts";
+import type { AlertInfo } from "./alerts.ts";
 import { ItemType, type CDNMedia, type IncomingMessage } from "./types.ts";
 
 /** Inbound event format version (docs/protocol.md). */
@@ -19,6 +20,8 @@ export interface WxEvent {
   schema: string;
   event_id: string;
   binding: string;
+  /** "message": a WeChat message. "alert": a bridge problem, details in `alert`. */
+  kind: "message" | "alert";
   message_id: string;
   from_wxid: string;
   to_bot_id: string;
@@ -29,6 +32,7 @@ export interface WxEvent {
   media_errors?: string[];
   has_context_token: boolean;
   reply_hint: string;
+  alert?: AlertInfo;
 }
 
 export interface MediaToStore {
@@ -116,6 +120,7 @@ export async function buildEvent(
     schema: EVENT_SCHEMA,
     event_id: `${binding}:${msgid}`,
     binding,
+    kind: "message",
     message_id: msgid,
     from_wxid: msg.from_user_id,
     to_bot_id: msg.to_user_id || client.botId,

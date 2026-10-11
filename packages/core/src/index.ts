@@ -10,5 +10,6 @@ export * from "./events.ts";
 export * from "./inbox.ts";
 export * from "./webhook.ts";
 export * from "./poller.ts";
+export * from "./alerts.ts";
 export * from "./send.ts";
 export * from "./api.ts";

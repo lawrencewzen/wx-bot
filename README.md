@@ -205,6 +205,8 @@ curl -X POST http://127.0.0.1:18790/v1/send \
 
 ## FAQ
 
+**wx-bot 出问题会通知谁？** 连不上微信超过 2 分钟、登录过期、恢复时，wx-bot 往 Agent 投一条 `kind: "alert"` 事件，由 Agent 在它自己的聊天里告诉你；反过来，Agent 超过 10 分钟没处理排队的消息时，wx-bot 直接用微信提醒你。详见 [协议 2.1](docs/protocol.md#21-异常通知kind-alert)。
+
 **微信发了消息，Agent 一直没收到？** 先跑 `wx-bot health --grace 0`，它会说明是服务没在运行、登录过期，还是连不上微信。云电脑只能通过代理出网时，systemd 服务默认不带 shell 里的 `https_proxy` 等变量，要写进 `~/.config/wx-bot/env` 后重启服务（Linux 上 `install.sh` 会自动写入）。
 
 **poller 停了，日志提示 `-14`？** 会话过期，重新 `wx-bot login <binding>`。
