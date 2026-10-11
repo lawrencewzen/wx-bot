@@ -17,7 +17,8 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run typecheck && bun test
       - run: cd packages/cli && bun run scripts/cross.ts "$GITHUB_REF_NAME"
-      - run: cd dist && sha256sum wx-bot_* > checksums.txt
+      - run: cp deploy/keepalive.sh dist/wx-bot-keepalive
+      - run: cd dist && sha256sum wx-bot_* wx-bot-keepalive > checksums.txt
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

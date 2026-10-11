@@ -67,6 +67,31 @@ async function download(url: string): Promise<Uint8Array> {
   return new Uint8Array(await resp.arrayBuffer());
 }
 
+export const KEEPALIVE_ASSET = "wx-bot-keepalive";
+
+/** Point the keepalive script's default binary path at where wx-bot is installed. */
+export function keepaliveFor(script: string, binary: string): string {
+  return script.replace("$HOME/.local/bin/wx-bot", binary);
+}
+
+/**
+ * Install or refresh wx-bot-keepalive next to the binary from the same
+ * release. Releases before v0.4.6 do not ship it; that is not an error.
+ */
+async function refreshKeepalive(base: string, sums: string, binary: string): Promise<string> {
+  const want = sums.split("\n").map((l) => l.trim().split(/\s+/)).find((f) => f[1] === KEEPALIVE_ASSET)?.[0];
+  if (!want) return "";
+  const data = await download(`${base}/${KEEPALIVE_ASSET}`);
+  const got = createHash("sha256").update(data).digest("hex");
+  if (got !== want) throw new Error(`sha256 mismatch for ${KEEPALIVE_ASSET}`);
+  const dest = join(dirname(binary), KEEPALIVE_ASSET);
+  const tmp = `${dest}.new.${process.pid}`;
+  writeFileSync(tmp, keepaliveFor(new TextDecoder().decode(data), binary), { mode: 0o755 });
+  chmodSync(tmp, 0o755);
+  renameSync(tmp, dest);
+  return dest;
+}
+
 const run = (cmd: string, args: string[]) => spawnSync(cmd, args, { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" });
 
 /** Restart a running wx-bot service; returns a message for the user. */
@@ -135,8 +160,9 @@ export async function cmdUpdate(current: string, args: string[]): Promise<number
   const base = `${RELEASES}/download/${encodeURIComponent(tag)}`;
   console.log(`downloading ${asset} ${tag}`);
   let bin: Uint8Array;
+  let sums: string;
   try {
-    const sums = new TextDecoder().decode(await download(`${base}/checksums.txt`));
+    sums = new TextDecoder().decode(await download(`${base}/checksums.txt`));
     const want = sums.split("\n").map((l) => l.trim().split(/\s+/)).find((f) => f[1] === asset)?.[0];
     if (!want) throw new Error(`checksums.txt has no entry for ${asset}`);
     bin = await download(`${base}/${asset}`);
@@ -161,6 +187,12 @@ export async function cmdUpdate(current: string, args: string[]): Promise<number
     return console.error(`wx-bot update: ${e.message}${hint}`), 1;
   }
   console.log(`wx-bot updated: ${current} -> ${tag} (${target})`);
+  try {
+    const ka = await refreshKeepalive(base, sums, target);
+    if (ka) console.log(`updated ${ka}`);
+  } catch (err) {
+    console.error(`wx-bot update: keepalive script not updated: ${(err as Error).message}`);
+  }
   console.log("Config, login state and inbox are unchanged; no need to scan the QR code again.");
   if (!v["no-restart"]) console.log(restartService());
   return 0;

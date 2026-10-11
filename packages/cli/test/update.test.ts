@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { assetName, compareSemver, parseSemver } from "../src/cmd/update.ts";
+import { assetName, compareSemver, keepaliveFor, parseSemver } from "../src/cmd/update.ts";
 
 test("semver", () => {
   expect(parseSemver("v0.4.1")).toEqual([0, 4, 1]);
@@ -15,4 +15,9 @@ test("asset names match release files", () => {
   expect(assetName("linux", "arm64", true)).toBe("wx-bot_linux_arm64_musl");
   expect(assetName("darwin", "arm64", true)).toBe("wx-bot_darwin_arm64");
   expect(assetName("darwin", "x64", false)).toBe("wx-bot_darwin_amd64");
+});
+
+test("keepalive default binary path follows the install location", () => {
+  const script = 'WXBOT="${WXBOT:-$HOME/.local/bin/wx-bot}"\n';
+  expect(keepaliveFor(script, "/usr/local/bin/wx-bot")).toBe('WXBOT="${WXBOT:-/usr/local/bin/wx-bot}"\n');
 });
