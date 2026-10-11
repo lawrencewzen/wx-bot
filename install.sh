@@ -187,6 +187,20 @@ if [[ ! -f "$ENVFILE" ]]; then
   echo "wrote env template to $ENVFILE (mode 0600); fill WXBOT_WEBHOOK_KEY (and friends)."
 fi
 
+# ---------- proxy (Linux) ----------
+# Services start without the shell's proxy variables. On cloud machines whose
+# only way out is a proxy, wx-bot run would then never reach WeChat.
+if [[ "$OS" == linux ]]; then
+  PROXY_LINES="$(env | grep -iE '^(https?|all|no)_proxy=' | sort || true)"
+  if [[ -n "$PROXY_LINES" ]]; then
+    { grep -viE '^(https?|all|no)_proxy=' "$ENVFILE" || true; printf '%s\n' "$PROXY_LINES"; } > "$TMP/env.new"
+    if ! cmp -s "$TMP/env.new" "$ENVFILE"; then
+      install -m 0600 "$TMP/env.new" "$ENVFILE"
+      echo "copied this shell's proxy settings to $ENVFILE (the service needs them to reach WeChat)"
+    fi
+  fi
+fi
+
 # ---------- service unit (only with --service) ----------
 
 if [[ "$SERVICE" -eq 1 ]]; then

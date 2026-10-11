@@ -3,7 +3,7 @@ import { IlinkClient } from "../src/client.ts";
 import { encryptAes128Ecb, toHex } from "../src/crypto.ts";
 import type { MediaSink, WxEvent } from "../src/events.ts";
 import { Inbox } from "../src/inbox.ts";
-import { Poller, type PollerStore } from "../src/poller.ts";
+import { Poller, type PollerStore, type PollHealth } from "../src/poller.ts";
 import { ItemType, type GetUpdatesResponse } from "../src/types.ts";
 import { memorySql, serve, until } from "./helpers.ts";
 
@@ -52,6 +52,7 @@ function setup(bodies: string[], opts: Partial<{ allow: string[] }> = {}) {
   const inbox = new Inbox(memorySql());
   const { s, store } = memStore();
   const sink = memSink();
+  const health: PollHealth[] = [];
   const poller = new Poller({
     binding: "xiaox",
     client,
@@ -62,12 +63,13 @@ function setup(bodies: string[], opts: Partial<{ allow: string[] }> = {}) {
     pollTimeoutMs: 200,
     retryDelayMs: 10,
     backoffDelayMs: 20,
+    onHealth: (h) => health.push(h),
   });
   const ctl = new AbortController();
   const done = poller.run(ctl.signal);
   const events = () =>
     inbox.claim(["xiaox"], 100, 3_600_000).map((e) => JSON.parse(new TextDecoder().decode(e.payload)) as WxEvent);
-  return { il, client, inbox, s, sink, ctl, done, events };
+  return { il, client, inbox, s, sink, ctl, done, events, health };
 }
 
 test("queues allowed messages with media, skips strangers, saves cursor and tokens", async () => {
@@ -130,6 +132,26 @@ test("business error keeps cursor; replay delivers once", async () => {
   expect(t.events().length).toBe(1);
   expect(JSON.parse(t.il.requests[1]!.body).get_updates_buf).toBe("");
   expect(JSON.parse(t.il.requests[2]!.body).get_updates_buf).toBe("c1");
+  expect(t.health.slice(0, 3)).toEqual([{ ok: false, error: "getupdates ret=-1 errcode=0" }, { ok: true }, { ok: true }]);
+});
+
+test("transport errors are reported as unhealthy until a poll succeeds", async () => {
+  const t = setup([]);
+  await until(() => t.health.some((h) => h.ok), 3000, "first ok");
+  t.ctl.abort();
+  await t.done;
+  const c = new IlinkClient({ bot_token: "x", base_url: "http://127.0.0.1:1", ilink_bot_id: "b", ilink_user_id: "u" });
+  const health: PollHealth[] = [];
+  const ctl = new AbortController();
+  const p = new Poller({
+    binding: "x", client: c, store: memStore().store, inbox: t.inbox, media: memSink(), allow: new Set(),
+    pollTimeoutMs: 200, retryDelayMs: 10, backoffDelayMs: 10, onHealth: (h) => health.push(h),
+  });
+  const done = p.run(ctl.signal);
+  await until(() => health.length >= 2, 3000, "two failures");
+  ctl.abort();
+  await done;
+  expect(health.every((h) => !h.ok && h.error.length > 0)).toBe(true);
 });
 
 test("-14 marks expired and stops", async () => {
@@ -148,6 +170,7 @@ test("queue failure keeps cursor", async () => {
   t.ctl.abort();
   await t.done;
   expect(t.s.cursor).toBe("");
+  expect(t.health[0]).toEqual({ ok: false, error: "queue message: disk full" });
 });
 
 test("deadline stops before a poll that would overrun", async () => {

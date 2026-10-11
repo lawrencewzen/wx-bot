@@ -195,7 +195,7 @@ image=@a.jpg   或 file=@a.pdf   或 video=@a.mp4   （最多一个文件，≤ 
 
 响应体为 `{"ok": true}` 或 `{"error": "<原因>"}`。命令行失败时退出码非 0，原因写在 stderr。
 
-其他接口：`GET /v1/status`（各 binding 的登录、投递方式、收件箱计数）、`GET /healthz`。
+其他接口：`GET /v1/status`（各 binding 的登录、轮询状态 `poll`、投递方式、收件箱计数）、`GET /healthz`。`poll.state` 为 `ok`、`starting`、`failing`（附 `error`）、`stalled` 或 `not_running`。
 
 **限制**：微信只显示纯文本，Markdown 请在 Agent 侧去掉；单文件上限 100 MB；回复依赖用户最近发来消息时的上下文，长时间未互动可能无法主动推送。
 

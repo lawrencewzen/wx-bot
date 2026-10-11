@@ -1,6 +1,7 @@
 import { createApiHandler, deliverNext, Poller, sendMessage, type Inbox, type SendRequest } from "@wx-bot/core";
 import { DELIVERY_WEBHOOK, inboxPath, loadConfig, type Config } from "../config.ts";
 import { mkdir0700 } from "../fsutil.ts";
+import { HealthWriter, healthPath } from "../health.ts";
 import { fileMediaSink, openLive, type LiveBinding } from "../live.ts";
 import { log, logger } from "../log.ts";
 import { openInbox } from "../sqlite.ts";
@@ -77,6 +78,8 @@ export async function cmdRun(configPath: string, args: string[]): Promise<number
     }
     live.set(b.name, lb);
     const plog = logger({ component: "poller", binding: b.name });
+    const health = new HealthWriter(healthPath(cfg.state_dir, b.name));
+    if (health.proxy) plog("info", "using proxy", { proxy: health.proxy });
     const poller = new Poller({
       binding: b.name,
       client: lb.client,
@@ -86,9 +89,15 @@ export async function cmdRun(configPath: string, args: string[]): Promise<number
       allow: lb.allow,
       forwardUnallowed: b.forward_unallowed,
       log: (level, msg) => plog(level, msg),
+      onHealth: (h) => health.update(h),
     });
     plog("info", "poller start");
-    tasks.push(poller.run(ctl.signal).then((exit) => plog("info", "poller stop", { reason: exit })));
+    tasks.push(
+      poller.run(ctl.signal).then((exit) => {
+        health.close();
+        plog("info", "poller stop", { reason: exit });
+      }),
+    );
   }
 
   tasks.push(pruneLoop(box, ctl.signal));

@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { defaultConfigPath } from "./config.ts";
+import { cmdHealth } from "./cmd/health.ts";
 import { cmdInbox } from "./cmd/inbox.ts";
 import { cmdLogin } from "./cmd/login.ts";
 import { cmdRun } from "./cmd/run.ts";
@@ -28,7 +29,8 @@ Commands:
   run               Poll iLink, queue messages, deliver to webhooks
   send              Send a message (see wx-bot send -h)
   inbox             Claim / ack queued events for pull bindings (see wx-bot inbox)
-  status            Show per-binding login / delivery / inbox state
+  status            Show per-binding login / poll / delivery / inbox state
+  health            Exit 1 with a hint if a binding cannot receive messages
   update            Upgrade to the latest release (see wx-bot update -h)
   version           Print version
 
@@ -71,6 +73,8 @@ async function main(argv: string[]): Promise<number> {
       return cmdStatus(path, rest);
     case "inbox":
       return cmdInbox(path, rest);
+    case "health":
+      return cmdHealth(path, rest);
     case "help":
     case "-h":
     case "--help":

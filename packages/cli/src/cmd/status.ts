@@ -1,6 +1,7 @@
 import { allowlist, type Inbox, type InboxCounts } from "@wx-bot/core";
 import { existsSync } from "node:fs";
 import { DELIVERY_WEBHOOK, inboxPath, loadConfig, type Binding, type Config } from "../config.ts";
+import { describePoll, healthPath, pollStatus, readHealth, type PollStatus } from "../health.ts";
 import { openInbox } from "../sqlite.ts";
 import { Store } from "../state.ts";
 
@@ -13,6 +14,8 @@ export interface BindingStatus {
   allowlist: string[];
   delivery: string;
   webhook_host: string;
+  /** Whether `wx-bot run` is polling iLink for this binding, from its health file. */
+  poll: PollStatus;
   inbox?: InboxCounts;
 }
 
@@ -40,6 +43,7 @@ export function statusOf(cfg: Config, b: Binding, box?: Inbox): BindingStatus {
     allowlist: [],
     delivery: b.delivery,
     webhook_host: host(b.webhook.url),
+    poll: pollStatus(readHealth(healthPath(cfg.state_dir, b.name))),
   };
   if (box) st.inbox = box.stats(b.name);
   let loginUser = "";
@@ -78,6 +82,7 @@ export async function cmdStatus(configPath: string, args: string[]): Promise<num
         `binding: ${st.name}`,
         `  logged_in: ${st.logged_in}`,
         `  expired: ${st.expired}`,
+        `  poll: ${describePoll(st.poll)}`,
         `  bot_id: ${st.bot_id}`,
         `  cursor: ${st.cursor_set ? "set" : "unset"}`,
         `  allowlist: ${st.allowlist.join(", ")}`,

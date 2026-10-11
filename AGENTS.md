@@ -9,6 +9,7 @@
 | Pi Durable 或其他有 HTTP 入口的 Agent Runtime | webhook | [Pi Durable](#pi-durable) |
 | 其他 | 按 [`docs/protocol.md`](docs/protocol.md) 选择 | — |
 | **已经装过，用户让你升级 wx-bot** | — | [升级](#升级) |
+| **已经装过，用户说收不到微信消息** | — | [断线排查](#断线排查) |
 
 所有 Agent 都要遵守：
 
@@ -22,6 +23,7 @@
   ```
 - 同一条消息可能收到不止一次，按 `event_id` 去重。
 - `wx-bot send` 失败：提示 `no context_token` 表示用户还没先给 ClawBot 发过消息；提示 `expired` 或 `-14` 表示登录过期，需要重新扫码。都在你自己的聊天里告诉用户，不要反复重试。
+- 装好或重启服务后，等 15 秒运行 `~/.local/bin/wx-bot health --grace 0`，**退出码为 0 才算装好**。不是 0 就按它输出的提示和[断线排查](#断线排查)处理，不要只看服务是 active 就告诉用户装好了。
 
 ---
 
@@ -69,7 +71,7 @@
 
 6. **扫码登录**：运行 `wx-bot login <binding>`（`<binding>` 是配置里 `bindings[0].name`，示例配置为 `xiaox`），把二维码展示给用户，让用户用微信扫码。二维码过期会自动刷新最多 3 次。
 
-7. **启动**：按 `install.sh` 输出的命令加载 systemd / launchd 服务；或直接运行 `wx-bot run`。用 `wx-bot status` 确认在运行。
+7. **启动**：按 `install.sh` 输出的命令加载 systemd / launchd 服务；或直接运行 `wx-bot run`。按本文开头的规则用 `wx-bot health --grace 0` 确认能收到消息。
 
 8. **告诉用户**：先用自己的微信给 ClawBot 发一条消息，之后就能对话。
 
@@ -96,6 +98,14 @@ wx-bot 跑在**你自己的运行环境**里（不是用户的 Mac），作为 s
 
 2. **写配置**：`~/.config/wx-bot/config.json`（目录权限 0700，文件 0600），内容取自 [`examples/config.pull.example.json`](examples/config.pull.example.json)，binding 名为 `muse`，`"delivery": "pull"`。pull 模式不需要 webhook URL 和 key。
 
+   如果你的 shell 里有代理变量（`env | grep -i _proxy` 有输出），把它们写进 `~/.config/wx-bot/env`。systemd 服务启动时**不带**这些变量，不写的话服务连不上微信：
+
+   ```bash
+   f=~/.config/wx-bot/env; touch "$f"
+   { grep -viE '^(https?|all|no)_proxy=' "$f"; env | grep -iE '^(https?|all|no)_proxy='; } > "$f.new"
+   mv "$f.new" "$f" && chmod 0600 "$f"
+   ```
+
 3. **扫码登录**：二维码要以**图片**发给用户。
 
    ```bash
@@ -113,9 +123,14 @@ wx-bot 跑在**你自己的运行环境**里（不是用户的 Mac），作为 s
    systemctl status wx-bot --no-pager && ~/.local/bin/wx-bot status
    ```
 
-   `status` 应显示 `logged_in: true`、`delivery: pull`。**每次重新扫码后都要 `systemctl restart wx-bot`**。
+   `status` 应显示 `logged_in: true`、`delivery: pull`。再等 15 秒运行 `~/.local/bin/wx-bot health --binding muse --grace 0`，退出码必须为 0；否则按输出提示处理（最常见的是第 2 步的代理没写）。**每次重新扫码或改了 env 文件后都要 `systemctl restart wx-bot`**。
 
-5. **建 hook**：按 [`adapters/muse/wechat-hook.sh`](adapters/muse/wechat-hook.sh) 在 `~/hooks/scripts/` 下写检测脚本，套用你的 hook 脚本协议：`wx-bot inbox count --binding muse` 大于 0 时 `wake`，否则 `silent`。轮询间隔设 5–10 秒。先 `hooks.dry_run` 检查（`count` 不领取消息，dry run 不会吃掉消息），再 `hooks.enable`。
+5. **建 hook**：按 [`adapters/muse/wechat-hook.sh`](adapters/muse/wechat-hook.sh) 在 `~/hooks/scripts/` 下写检测脚本，套用你的 hook 脚本协议：
+   - `wx-bot inbox count --binding muse` 大于 0 时 `wake`（有新消息）；
+   - 否则运行 `wx-bot health --binding muse`，退出码非 0 时 `wake`（wx-bot 异常，唤醒文字带上它的输出），同一个问题只唤醒一次、之后每小时最多再提醒一次；
+   - 其余 `silent`。
+
+   轮询间隔设 **5 秒**。先 `hooks.dry_run` 检查（`count` 和 `health` 都不领取消息，dry run 不会吃掉消息），再 `hooks.enable`。
 
 6. **被唤醒后怎么做**（把这段写进 hook 唤醒你时要执行的指令）：
 
@@ -124,6 +139,8 @@ wx-bot 跑在**你自己的运行环境**里（不是用户的 Mac），作为 s
    3. 回复：`~/.local/bin/wx-bot send --binding muse --to <from_wxid> --text - <<'EOF'`，下一行起是回复内容，最后一行 `EOF`；图片、文件、视频用 `--image` / `--file` / `--video`。只发纯文本。较长的任务先回一句简短确认，做完再发结果。
    4. 每条处理完（包括决定不回复）后：`~/.local/bin/wx-bot inbox ack <event_id>`。没 ack 的消息 30 分钟后会再次唤醒你。
    5. `send` 失败时按本文开头的规则在 Muse 聊天里告诉用户；登录过期就重做第 3 步并重启服务。
+
+   如果唤醒原因是「wx-bot 异常」：按[断线排查](#断线排查)修复，并在 Muse 聊天里告诉用户原因和处理结果。
 
 7. **告诉用户**：先用自己的微信给 ClawBot 发一条消息，之后就能对话。
 
@@ -142,11 +159,33 @@ wx-bot 跑在**你自己的运行环境**里（不是用户的 Mac），作为 s
      ```
 
    两种方式都会自动选对文件（含 musl）、校验 sha256、替换程序，并重启正在运行的 systemd / launchd 服务。输出里出现 `restart it` 时，按提示手动重启（例如 Muse 的系统服务需要 `sudo systemctl restart wx-bot`）。
-2. **确认**：`wx-bot version` 是新版本，`wx-bot status` 显示 `logged_in: true`。
+2. **确认**：`wx-bot version` 是新版本；等 15 秒后 `wx-bot health --grace 0` 退出码为 0。
 3. **更新回复指令**：你的 routine 或 hook 指令里如果回复写的是 `--text '<回复>'`，改成 `--text -` 加带引号的 heredoc（见本文开头），引号就不用再手动转义。
 4. **告诉用户**：从哪个版本升级到哪个版本，并请用户发一条微信确认能正常对话。
 
 出问题需要回滚：`wx-bot update --version <旧版本号>`。Docker 部署（例如 Pi Durable）不用这一节：改镜像标签后 `docker compose up -d`。
+
+---
+
+## 断线排查
+
+用户说收不到微信消息，或 hook 因「wx-bot 异常」唤醒你时执行。先运行：
+
+```bash
+~/.local/bin/wx-bot health --grace 0
+```
+
+按输出处理（改完都要重启服务，再跑一次 `health` 直到退出码为 0）：
+
+| 输出 | 原因 | 处理 |
+| --- | --- | --- |
+| `login expired` / `not logged in` | 登录过期 | 重新扫码登录（Grok 第 6 步 / Muse 第 3 步），然后重启服务 |
+| `wx-bot run is not running` | 服务没在运行 | `systemctl status wx-bot`（Grok 用 `systemctl --user`）看原因，日志用 `journalctl -u wx-bot -n 50`，修好后启动 |
+| `the service has no proxy but this shell uses …` | 服务没带代理，连不上微信 | 按 Muse 第 2 步把代理变量写进 `~/.config/wx-bot/env` |
+| `the service uses proxy A but this shell uses B` 或 `if its credentials changed` | 代理地址或密码换了 | 同上，重新写一遍 env 文件 |
+| `stalled` 或其他 `failing` | 卡住或网络问题 | 重启服务；仍不行把输出告诉用户 |
+
+重启服务：Muse 用 `sudo systemctl restart wx-bot`，Grok 用 `systemctl --user restart wx-bot`。断线期间发来的消息一般会在恢复后补收。
 
 ---
 

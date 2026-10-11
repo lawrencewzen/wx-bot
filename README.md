@@ -186,7 +186,8 @@ EOF
 wx-bot send --binding xiaox --to <wxid> --image ./a.jpg --caption '见图'
 wx-bot send --binding xiaox --to <wxid> --file ./a.pdf
 wx-bot send --binding xiaox --to <wxid> --video ./a.mp4
-wx-bot status
+wx-bot status    # 登录、轮询（poll: ok / failing / not running）、投递、收件箱状态
+wx-bot health    # 收不到消息时先跑这个：退出码 0 表示正常，否则输出原因和处理办法
 ```
 
 或在 `wx-bot run` 期间调用本地 API：
@@ -203,6 +204,8 @@ curl -X POST http://127.0.0.1:18790/v1/send \
 只发纯文本，Markdown 请在 Agent 侧去掉。单文件上限 100 MB。
 
 ## FAQ
+
+**微信发了消息，Agent 一直没收到？** 先跑 `wx-bot health --grace 0`，它会说明是服务没在运行、登录过期，还是连不上微信。云电脑只能通过代理出网时，systemd 服务默认不带 shell 里的 `https_proxy` 等变量，要写进 `~/.config/wx-bot/env` 后重启服务（Linux 上 `install.sh` 会自动写入）。
 
 **poller 停了，日志提示 `-14`？** 会话过期，重新 `wx-bot login <binding>`。
 

@@ -22,11 +22,15 @@ export interface PollerOptions {
   /** Queue messages from non-allowlisted senders too (they still cannot be replied to). */
   forwardUnallowed?: boolean;
   log?: (level: "info" | "warn" | "error", msg: string) => void;
+  /** Called after every getupdates round: ok, or the error that made it fail. */
+  onHealth?: (h: PollHealth) => void;
   pollTimeoutMs?: number;
   retryDelayMs?: number;
   backoffDelayMs?: number;
   maxFailures?: number;
 }
+
+export type PollHealth = { ok: true } | { ok: false; error: string };
 
 export type PollerExit = "stopped" | "expired" | "deadline";
 
@@ -48,8 +52,8 @@ const sleep = (ms: number, signal?: AbortSignal) =>
  * batch (the inbox ignores duplicate event ids).
  */
 export class Poller {
-  private readonly o: Required<Omit<PollerOptions, "forwardUnallowed" | "log">> &
-    Pick<PollerOptions, "forwardUnallowed" | "log">;
+  private readonly o: Required<Omit<PollerOptions, "forwardUnallowed" | "log" | "onHealth">> &
+    Pick<PollerOptions, "forwardUnallowed" | "log" | "onHealth">;
 
   constructor(opts: PollerOptions) {
     this.o = {
@@ -63,6 +67,14 @@ export class Poller {
 
   private log(level: "info" | "warn" | "error", msg: string) {
     this.o.log?.(level, msg);
+  }
+
+  private health(h: PollHealth) {
+    try {
+      this.o.onHealth?.(h);
+    } catch (err) {
+      this.log("warn", `health callback: ${(err as Error).message}`);
+    }
   }
 
   /**
@@ -95,6 +107,7 @@ export class Poller {
       } catch (err) {
         if (signal?.aborted) return "stopped";
         this.log("warn", `getupdates error (failures ${failures + 1}): ${(err as Error).message}`);
+        this.health({ ok: false, error: (err as Error).message });
         await pause();
         continue;
       }
@@ -107,6 +120,7 @@ export class Poller {
       // Business error: keep cursor and messages untouched, retry like a transport error.
       if (resp.ret || resp.errcode) {
         this.log("warn", `getupdates business error ret=${resp.ret ?? 0} errcode=${resp.errcode ?? 0}; cursor unchanged`);
+        this.health({ ok: false, error: `getupdates ret=${resp.ret ?? 0} errcode=${resp.errcode ?? 0}` });
         await pause();
         continue;
       }
@@ -119,6 +133,7 @@ export class Poller {
           await this.handle(msg);
         } catch (err) {
           this.log("error", `queue message ${msg.message_id} failed; cursor unchanged: ${(err as Error).message}`);
+          this.health({ ok: false, error: `queue message: ${(err as Error).message}` });
           queued = false;
           break;
         }
@@ -127,6 +142,7 @@ export class Poller {
         await sleep(o.retryDelayMs, signal);
         continue;
       }
+      this.health({ ok: true });
       if (resp.get_updates_buf) {
         try {
           await o.store.saveCursor(resp.get_updates_buf);
