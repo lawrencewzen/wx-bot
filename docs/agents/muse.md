@@ -38,7 +38,7 @@ wx-bot 跑在**你自己的运行环境**里（不是用户的 Mac），作为 s
      > ~/wx-bot-login.log 2>&1 < /dev/null &
    ```
 
-   `setsid` 让登录进程脱离当前命令，不会在命令结束后被清理掉。登录进程会一直等 10 分钟，每张码过期就换一张。每张码单独一个文件（`~/workspace/wx-bot-qr-1.png`、`~/workspace/wx-bot-qr-2.png`……，即 `sandbox://workspace/wx-bot-qr-<n>.png`），日志里对应两行：`QR #n id=... generated_at=... expires_at=...`（UTC）和 `QR PNG: <路径>`。
+   `setsid` 让登录进程脱离当前命令，不会在命令结束后被清理掉。登录进程会一直等 10 分钟，每张码过期就换一张。每张码单独一个文件，文件名带编号和二维码 id（如 `~/workspace/wx-bot-qr-1-5bbf0bb1.png`，即 `sandbox://workspace/wx-bot-qr-<n>-<id>.png`），每次登录都不会和以前的重名，日志里对应两行：`QR #n id=... generated_at=... expires_at=...`（UTC）和 `QR PNG: <路径>`。
 
    - **日志里出现新的 `QR PNG: <路径>`，立刻把这个路径的图片原样发到聊天里**，中间不要做别的事。**不要复制或改名成固定文件名**（如 `wx-bot-qr.png`）：聊天界面按路径缓存图片，同一路径永远显示第一张，用户扫到的就一直是过期码。消息里同时写上 `QR #n` 和 id 前 8 位，方便用户核对。告诉用户：「用微信扫这个二维码并在手机上确认，约 2 分钟内有效」。用户需要在另一块屏幕上看到它再用手机扫，同一台手机扫不了自己屏幕上的码。
    - 同一个 `QR #n` 只发一次。之后继续盯日志：出现 `QR #n+1` 说明上一张已过期，立即发新图；出现 `login ok` 即成功。

@@ -11,26 +11,27 @@ import { Store } from "../state.ts";
 const SPEC = {
   "qr-png": {
     type: "string",
-    usage: "also write each QR code as a PNG: qr.png -> qr-1.png, qr-2.png, ... (for agents that send it as an image); removed when login ends",
+    usage: "also write each QR code as a PNG: qr.png -> qr-1-<id>.png, qr-2-<id>.png, ... (for agents that send it as an image); removed when login ends",
     default: "",
   },
   timeout: { type: "string", usage: "give up if not scanned within this time; a new QR is shown every ~2m", default: "10m0s" },
 } as const;
 
 /**
- * One file per QR: chat apps may show an attachment by reading its path later,
- * so a reused path would make earlier messages show a different (newer) code.
+ * One file per QR, unique across logins: chat apps may cache an attachment by
+ * its path, so a reused path (even from an earlier login) shows an old code.
  */
-export function qrPngPath(base: string, n: number): string {
+export function qrPngPath(base: string, n: number, id: string): string {
   const ext = extname(base) || ".png";
-  return join(dirname(base), `${basename(base, extname(base))}-${n}${ext}`);
+  const tag = id.replace(/[^0-9a-zA-Z]/g, "").slice(0, 8);
+  return join(dirname(base), `${basename(base, extname(base))}-${n}${tag ? `-${tag}` : ""}${ext}`);
 }
 
 /** Remove base and every base-<n> PNG next to it. */
 function removeQrPngs(base: string) {
   rmSync(base, { force: true });
   const ext = extname(base) || ".png";
-  const re = new RegExp(`^${basename(base, extname(base)).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-\\d+${ext.replace(".", "\\.")}$`);
+  const re = new RegExp(`^${basename(base, extname(base)).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-\\d+(-[0-9a-zA-Z]+)?${ext.replace(".", "\\.")}$`);
   try {
     for (const f of readdirSync(dirname(base))) if (re.test(f)) rmSync(join(dirname(base), f), { force: true });
   } catch {}
@@ -88,7 +89,7 @@ export async function cmdLogin(configPath: string, args: string[]): Promise<numb
       console.log(qr.imageContent);
       if (qrPng) {
         try {
-          const path = qrPngPath(qrPng, attempt);
+          const path = qrPngPath(qrPng, attempt, qr.qrcode);
           // 0644 and the directory untouched: a chat app serving the file may run as another user.
           writeAtomic(path, await QRCode.toBuffer(qr.imageContent, { type: "png", errorCorrectionLevel: "M", scale: 8, margin: 4 }), 0o644);
           console.log(`QR PNG: ${path}`);
