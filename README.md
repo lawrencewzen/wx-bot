@@ -112,7 +112,7 @@ v0.4.0 之前的版本，重跑一遍 `install.sh` 即可升级。也可以直�
 | `send` 报 `no context_token` | 对方还没给 ClawBot 发过消息，先发一条 |
 | 日志出现 `-14` / `expired` | 登录过期，重新 `wx-bot login <binding>` |
 | 只能走代理出网 | 把 `https_proxy` 写进 `~/.config/wx-bot/env`，重启服务 |
-| `status` 里有 `dead` 消息 | 被 Agent 拒绝（400/413/422）或超过 7 天，看日志 |
+| `status` 里有 `dead` 消息 | 被 Agent 拒绝（400/413/422；响应体含 rate limit 的 400 会按 1/2/5/10 分钟重投，不记 dead）或超过 7 天，看日志 |
 | 二维码要发给别人扫 | `wx-bot login <binding> --qr-png ./qr.png` |
 
 ## 开发

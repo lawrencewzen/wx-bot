@@ -15,24 +15,64 @@ export interface WebhookConfig {
 
 export const WEBHOOK_TIMEOUT_MS = 15_000;
 const MAX_BACKOFF_MS = 5 * 60_000;
+const MAX_ERROR_BODY = 2048;
+const REJECT_STATUSES = [400, 413, 422];
+const RATE_LIMIT_RE = /rate limit/i;
+/** 1, 2, 5, then 10 minutes for every later attempt. */
+const RATE_LIMIT_BACKOFF_MS = [60_000, 120_000, 300_000, 600_000];
 
 export class WebhookStatusError extends Error {
-  constructor(readonly status: number) {
-    super(`webhook status ${status}`);
+  constructor(
+    readonly status: number,
+    readonly body = "",
+  ) {
+    super(body ? `webhook status ${status}: ${body.length > 240 ? `${body.slice(0, 240)}…` : body}` : `webhook status ${status}`);
     this.name = "WebhookStatusError";
   }
 }
 
-/** A rejection that will not succeed on retry with the same body. */
-export function isPermanent(err: unknown): boolean {
-  return err instanceof WebhookStatusError && [400, 413, 422].includes(err.status);
+function isRateLimitReject(err: unknown): boolean {
+  return err instanceof WebhookStatusError && REJECT_STATUSES.includes(err.status) && RATE_LIMIT_RE.test(err.body);
 }
 
-/** 2s, 4s, 8s ... capped at 5 minutes. */
-export function retryBackoffMs(attempt: number): number {
+/** A rejection that will not succeed on retry with the same body. */
+export function isPermanent(err: unknown): boolean {
+  return err instanceof WebhookStatusError && REJECT_STATUSES.includes(err.status) && !RATE_LIMIT_RE.test(err.body);
+}
+
+/** Default 2s, 4s, 8s ... capped at 5 minutes. Rate-limited 400/413/422 use 1/2/5/10 min. */
+export function retryBackoffMs(attempt: number, err?: unknown): number {
+  if (isRateLimitReject(err)) {
+    return RATE_LIMIT_BACKOFF_MS[Math.min(Math.max(attempt, 1), RATE_LIMIT_BACKOFF_MS.length) - 1]!;
+  }
   let d = 2000;
   for (let i = 1; i < attempt && d < MAX_BACKOFF_MS; i++) d *= 2;
   return Math.min(d, MAX_BACKOFF_MS);
+}
+
+/** First ~2KB of a non-2xx body for logs and rate-limit detection. Read failures are ignored. */
+async function peekErrorBody(resp: Response): Promise<string> {
+  try {
+    const reader = resp.body?.getReader();
+    if (!reader) return "";
+    try {
+      const buf = new Uint8Array(MAX_ERROR_BODY);
+      let n = 0;
+      while (n < buf.length) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!value?.byteLength) continue;
+        const take = Math.min(value.byteLength, buf.length - n);
+        buf.set(value.subarray(0, take), n);
+        n += take;
+      }
+      return new TextDecoder().decode(buf.subarray(0, n));
+    } finally {
+      await reader.cancel().catch(() => undefined);
+    }
+  } catch {
+    return "";
+  }
 }
 
 export async function signBody(secret: string, body: Uint8Array): Promise<string> {
@@ -58,8 +98,11 @@ export async function postWebhook(cfg: WebhookConfig, body: Uint8Array, fetchImp
     signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
     redirect: "manual",
   });
-  await resp.body?.cancel();
-  if (resp.status >= 300) throw new WebhookStatusError(resp.status);
+  if (resp.status < 300) {
+    await resp.body?.cancel();
+    return;
+  }
+  throw new WebhookStatusError(resp.status, await peekErrorBody(resp));
 }
 
 export type DeliveryOutcome = "idle" | "delivered" | "retry" | "dead";
@@ -97,7 +140,7 @@ export async function deliverEvent(
       inbox.dead(ev.eventId, reason);
       return "dead";
     }
-    const delay = retryBackoffMs(ev.attempts);
+    const delay = retryBackoffMs(ev.attempts, err);
     opts.log?.(`webhook delivery of ${ev.eventId} failed (attempt ${ev.attempts}); retry in ${delay / 1000}s: ${reason}`);
     inbox.retry(ev.eventId, reason, now() + delay);
     return "retry";
