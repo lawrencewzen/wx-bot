@@ -55,7 +55,7 @@
 
    `install.sh --service` 已尝试开启 linger；上面再确认一次。如果报 `System has not been booted with systemd` 或没有 `systemctl`（不少云电脑如此），跳过上面三行，改为直接运行 `~/.local/bin/wx-bot-keepalive` 启动 wx-bot；开机后的启动由下一步的保活任务负责。然后按 [AGENTS.md 通用规则](../../AGENTS.md#通用规则)用 `wx-bot health --grace 0` 确认能收到消息。
 
-8. **建保活 routine**：云电脑可能被重启或恢复，服务不一定自己回来。再建一个 routine，名称如「wx-bot 保活」，触发方式选**定时、每 10 分钟**，指令写：
+8. **建保活 routine**：Grok Bot 等 Agent 的云电脑会自动休眠，也会被自动重置；休眠或重置时 wx-bot 可能被直接停掉，安装的程序、服务、登录态都可能丢失。这一步不能省。再建一个 routine，名称如「wx-bot 保活」，触发方式选**定时、每 10 分钟**，指令写：
 
    > 运行 `~/.local/bin/wx-bot-keepalive`（不存在就先执行 `curl -fsSL https://raw.githubusercontent.com/lawrencewzen/wx-bot/main/deploy/keepalive.sh -o ~/.local/bin/wx-bot-keepalive && chmod 0755 ~/.local/bin/wx-bot-keepalive`）。输出 `ok` 或 `restarted: …` 时什么都不用说，静默结束；输出 `NEED_USER: …` 时，把后面的原因翻译成中文，在聊天里告诉用户并说明怎么处理（例如登录过期就请用户重新扫码）。
 

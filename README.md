@@ -57,6 +57,9 @@ WeChat ──iLink──▶ wx-bot (inbox) ──webhook / pull──▶ Agent
 > [!NOTE]
 > 装好后**先用微信给 ClawBot 发一条消息**，Agent 才能回复你。
 
+> [!WARNING]
+> Grok Bot 等 Agent 的云电脑会自动休眠，也会被自动重置；休眠或重置时 wx-bot 可能被直接停掉，安装的程序、服务、登录态都可能丢失。请按 [Grok 安装第 8 步](docs/agents/grok.md#安装步骤) 配好每 10 分钟的保活。登录态丢了需要重新扫码，期间收不到微信消息。
+
 其他接法：[Pi Durable（Docker）](docs/integrations/pi-durable.md) · [Cloudflare Workers](docs/integrations/cloudflare.md) · 手动安装 ↓
 
 ### 手动安装
