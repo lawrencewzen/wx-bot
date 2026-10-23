@@ -18,6 +18,7 @@ import { mkdir0700 } from "../fsutil.ts";
 import { HealthWriter, healthPath } from "../health.ts";
 import { fileMediaSink, openLive, type LiveBinding } from "../live.ts";
 import { log, logger } from "../log.ts";
+import { bindRunStopSignals, errorLogAttrs, installRunProcessDiagnostics } from "../run-diagnostics.ts";
 import { openInbox } from "../sqlite.ts";
 import { Store } from "../state.ts";
 import { readMedia } from "./send.ts";
@@ -44,6 +45,16 @@ const sleep = (ms: number, signal: AbortSignal, wake?: (fn: () => void) => () =>
 
 export async function cmdRun(configPath: string, args: string[]): Promise<number> {
   if (args.length !== 0) return console.error("usage: wx-bot run"), 2;
+  installRunProcessDiagnostics();
+  try {
+    return await runMain(configPath);
+  } catch (err) {
+    log("error", "run crashed", errorLogAttrs(err));
+    return 1;
+  }
+}
+
+async function runMain(configPath: string): Promise<number> {
   const cfg = await loadConfig(configPath).catch((e: Error) => e);
   if (cfg instanceof Error) return console.error(`wx-bot: ${cfg.message}`), 1;
   let box: Inbox & { close(): void };
@@ -56,9 +67,7 @@ export async function cmdRun(configPath: string, args: string[]): Promise<number
   }
 
   const ctl = new AbortController();
-  const stop = () => ctl.abort();
-  process.once("SIGINT", stop);
-  process.once("SIGTERM", stop);
+  bindRunStopSignals(ctl);
 
   const live = new Map<string, LiveBinding>();
   const tasks: Promise<unknown>[] = [];
@@ -176,11 +185,29 @@ export async function cmdRun(configPath: string, args: string[]): Promise<number
   log("info", "local api listening", { component: "localapi", addr: `${host}:${server.port}` });
   log("info", "wx-bot running", { bindings: live.size });
 
-  await new Promise<void>((r) => ctl.signal.addEventListener("abort", () => r(), { once: true }));
+  const stopAll = async () => {
+    await server.stop();
+    await Promise.allSettled(tasks);
+    box.close();
+  };
+
+  try {
+    await new Promise<void>((r) => {
+      if (ctl.signal.aborted) return r();
+      ctl.signal.addEventListener("abort", () => r(), { once: true });
+    });
+  } catch (err) {
+    log("error", "run wait failed", errorLogAttrs(err));
+    await stopAll();
+    return 1;
+  }
+  if (!ctl.signal.aborted) {
+    log("error", "run ended without stop signal");
+    await stopAll();
+    return 1;
+  }
   log("info", "shutting down");
-  await server.stop();
-  await Promise.allSettled(tasks);
-  box.close();
+  await stopAll();
   return 0;
 }
 
