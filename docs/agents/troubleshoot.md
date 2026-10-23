@@ -13,12 +13,52 @@
 | 输出 | 原因 | 处理 |
 | --- | --- | --- |
 | `login expired` / `not logged in` | 登录过期 | 重新扫码登录（[Grok 第 6 步](grok.md#安装步骤) / [Muse 第 3 步](muse.md)），然后重启服务 |
-| `wx-bot run is not running` | 服务没在运行 | `systemctl status wx-bot`（Grok 用 `systemctl --user`）看原因，日志用 `journalctl -u wx-bot -n 50`，修好后启动 |
+| `wx-bot run is not running` | 服务没在运行 | 按下方「服务没在运行」处理 |
 | `the service has no proxy but this shell uses …` | 服务没带代理，连不上微信 | 按 [Muse 第 2 步](muse.md) 的命令把代理变量写进 `~/.config/wx-bot/env` |
 | `the service uses proxy A but this shell uses B` 或 `if its credentials changed` | 代理地址或密码换了 | 同上，重新写一遍 env 文件 |
 | `stalled` 或其他 `failing` | 卡住或网络问题 | 重启服务；仍不行把输出告诉用户 |
 
 重启服务：Muse 用 `sudo systemctl restart wx-bot`，Grok 用 `systemctl --user restart wx-bot`。断线期间发来的消息一般会在恢复后补收。
+
+## 服务没在运行
+
+先看 unit 还在不在：
+
+```bash
+systemctl cat wx-bot          # Muse 的系统 unit（/etc/systemd/system/wx-bot.service）
+systemctl --user cat wx-bot   # Grok 的 user unit
+```
+
+**找得到 unit：** `systemctl status wx-bot`（Grok 用 `systemctl --user`）看原因，日志用 `journalctl -u wx-bot -n 50`（Grok 加 `--user`），修好后按上面的命令重启。
+
+**`systemctl cat wx-bot` 提示找不到 unit**（运行环境被替换、`/etc` 被清空）：二进制、配置、登录态都在 home 下，**不用重新扫码**。先停掉 keepalive 可能留下的 nohup 进程，再按 [Muse 第 4 步](muse.md) 重装 unit 并 `enable --now`：
+
+```bash
+pkill -f "wx-bot.* run$" 2>/dev/null || true
+HOME_ABS="$(cd ~ && pwd)"
+USER_NAME="$(stat -c '%U' "$HOME_ABS" 2>/dev/null || id -un)"
+curl -fsSL https://raw.githubusercontent.com/lawrencewzen/wx-bot/main/adapters/muse/wx-bot.service \
+  | sed "s|__HOME__|${HOME_ABS}|g; s|__USER__|${USER_NAME}|g" \
+  | tee /etc/systemd/system/wx-bot.service >/dev/null
+systemctl daemon-reload && systemctl enable --now wx-bot
+```
+
+写 `/etc` 若 Permission denied，把 `tee` 改成 `sudo tee`，两条 `systemctl` 改成 `sudo systemctl`。装好后等 15 秒：
+
+```bash
+systemctl status wx-bot --no-pager
+~/.local/bin/wx-bot health --grace 0
+```
+
+退出码必须为 0。这不是用户故意停服务，直接重装，不必先问。在你自己的聊天里告诉用户：运行环境替换导致 systemd unit 丢失，已重装，登录态还在，不用扫码。
+
+**不能用 systemd**（没有 `systemctl`，或上面安装失败）时，不要反复 `systemctl restart`，直接运行：
+
+```bash
+~/.local/bin/wx-bot-keepalive
+```
+
+它只输出一行：`ok` / `restarted: …` 表示已经在收消息；`NEED_USER: …` 把后面的原因告诉用户。这只是把进程拉起来，下次环境再被替换仍要按上面重装 unit 才能开机自启。详见 [Muse：运行环境会被替换时](muse.md#运行环境会被替换时)。
 
 ## 二维码扫了提示过期
 

@@ -8,6 +8,11 @@
 #   restarted: <how>        wx-bot was down and has been started again
 #   NEED_USER: <reason>     cannot fix it alone; tell the user
 # Only NEED_USER needs a message to the user.
+#
+# Restart order when wx-bot run is down:
+#   1. systemctl --user restart wx-bot, if a user unit exists
+#   2. sudo -n systemctl restart wx-bot, if a system unit exists (/etc)
+#   3. pkill + setsid nohup wx-bot run (sudo -n never prompts; failure falls here)
 set -u
 WXBOT="${WXBOT:-$HOME/.local/bin/wx-bot}"
 ENVFILE="${HOME}/.config/wx-bot/env"
@@ -43,10 +48,20 @@ if [ "$live_rc" -ne 0 ]; then
 		;;
 	esac
 	# Prefer the service manager; fall back to a detached process with the env file.
-	if command -v systemctl >/dev/null 2>&1 && systemctl --user cat wx-bot >/dev/null 2>&1 &&
+	# /run/systemd/system exists only when this machine was booted with systemd.
+	if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1 &&
+		systemctl --user cat wx-bot >/dev/null 2>&1 &&
 		systemctl --user restart wx-bot >/dev/null 2>&1; then
 		how="systemctl --user restart wx-bot"
-	else
+	elif [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1 &&
+		systemctl cat wx-bot >/dev/null 2>&1; then
+		if [ "$(id -u)" -eq 0 ] && systemctl restart wx-bot >/dev/null 2>&1; then
+			how="systemctl restart wx-bot"
+		elif sudo -n systemctl restart wx-bot >/dev/null 2>&1; then
+			how="sudo -n systemctl restart wx-bot"
+		fi
+	fi
+	if [ -z "$how" ]; then
 		pkill -f "wx-bot.* run$" 2>/dev/null
 		mkdir -p "$(dirname "$LOG")"
 		(

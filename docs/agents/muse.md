@@ -45,30 +45,35 @@ wx-bot 跑在**你自己的运行环境**里（不是用户的 Mac），作为 s
    - **发图前先确认登录进程还在**：`pgrep -f "wx-bot login"` 有输出，且图片文件存在。登录进程一结束（成功、超时或被杀）这些图片都会被删除，聊天里的旧图会显示 Not found，这是正常的。图片不存在就**不要**发任何旧图，看日志最后一行：`login ok` 是成功；`not scanned within 10m0s` 是超时，等用户说准备好了再重新执行上面的命令；其他情况直接重新执行。
    - 用户说「过期了」：看日志最新的 `QR #n` 和进程是否还在，按上面两条发新图或重启登录，不要重发同一张。
 
-4. **常驻服务**：取 [`adapters/muse/wx-bot.service`](../../adapters/muse/wx-bot.service)，把 `__HOME__` 换成 home 的绝对路径、`__USER__` 换成该目录的属主，安装为 `/etc/systemd/system/wx-bot.service`，然后：
+4. **常驻服务**：把 [`adapters/muse/wx-bot.service`](../../adapters/muse/wx-bot.service) 装到 `/etc/systemd/system/wx-bot.service`（`__HOME__` 换成 home 的绝对路径，`__USER__` 换成该目录属主）：
 
    ```bash
+   HOME_ABS="$(cd ~ && pwd)"
+   USER_NAME="$(stat -c '%U' "$HOME_ABS" 2>/dev/null || id -un)"
+   curl -fsSL https://raw.githubusercontent.com/lawrencewzen/wx-bot/main/adapters/muse/wx-bot.service \
+     | sed "s|__HOME__|${HOME_ABS}|g; s|__USER__|${USER_NAME}|g" \
+     | tee /etc/systemd/system/wx-bot.service >/dev/null
    systemctl daemon-reload && systemctl enable --now wx-bot
    systemctl status wx-bot --no-pager && ~/.local/bin/wx-bot status
    ```
 
-   `systemctl is-enabled wx-bot` 应为 `enabled`：系统服务随电脑开机自动启动，重启后不用管。`status` 应显示 `logged_in: true`、`delivery: pull`。再等 15 秒运行 `~/.local/bin/wx-bot health --binding muse --grace 0`，退出码必须为 0；否则按输出提示处理（最常见的是第 2 步的代理没写）。**每次重新扫码或改了 env 文件后都要 `systemctl restart wx-bot`**。
+   写 `/etc` 若 Permission denied，把 `tee` 改成 `sudo tee`，上面的 `systemctl` 改成 `sudo systemctl`。`systemctl is-enabled wx-bot` 应为 `enabled`：系统服务随电脑开机自动启动，重启后不用管。`status` 应显示 `logged_in: true`、`delivery: pull`。再等 15 秒运行 `~/.local/bin/wx-bot health --binding muse --grace 0`，退出码必须为 0；否则按输出提示处理（最常见的是第 2 步的代理没写）。**每次重新扫码或改了 env 文件后都要 `systemctl restart wx-bot`**。运行环境会清掉 `/etc` 时见[运行环境会被替换时](#运行环境会被替换时)。
 
 5. **建 hook**：按 [`adapters/muse/wechat-hook.sh`](../../adapters/muse/wechat-hook.sh) 在 `~/hooks/scripts/` 下写检测脚本，套用你的 hook 脚本协议：
    - `wx-bot inbox count --binding muse` 大于 0 时 `wake`（有新消息）；
    - 否则运行 `wx-bot health --binding muse --liveness`，退出码非 0 时 `wake`（wx-bot 服务没在运行或卡住，唤醒文字以「wx-bot 异常：」开头并带上它的输出），同一个问题只唤醒一次、之后每小时最多再提醒一次。连不上微信、登录过期会以 alert 事件进收件箱，由上一条唤醒；
    - 其余 `silent`。
 
-   轮询间隔：建 hook 时 **`poll_interval_secs` 设为 5**（平台下限，默认 60 太慢）。先 `hooks.dry_run` 检查（`count` 和 `health` 都不领取消息，dry run 不会吃掉消息），再 `hooks.enable`。
+   轮询间隔：建 hook 时 **`poll_interval_secs` 设为 5**（平台下限，默认 60 太慢）。先 `hooks.dry_run` 检查（`count` 和 `health` 都不领取消息，dry run 不会吃掉消息），再 `hooks.enable`。运行环境会清掉 `/etc` 时见[运行环境会被替换时](#运行环境会被替换时)。
 
 6. **被唤醒后怎么做**（把这段**完整**写进 hook 唤醒你时要执行的指令）：
 
    **先看唤醒原因。**
 
    **A. 原因以「wx-bot 异常」开头**（wx-bot 服务没在运行或卡住）：
-   1. **不要**去 pull 消息，也不要自行重启服务（用户可能是故意停的）。
+   1. **不要**去 pull 消息。不要自行重启服务（用户可能是故意停的），**除非** `systemctl cat wx-bot` 提示找不到 unit：那是运行环境被替换、`/etc` 被清空，按[运行环境会被替换时](#运行环境会被替换时)和第 4 步重装 unit，不必等用户点头，也不用重新扫码。
    2. 运行 `~/.local/bin/wx-bot health --binding muse --grace 0`，对照[断线排查](troubleshoot.md)判断原因和处理办法。
-   3. **必须在 Muse 聊天里给用户发一条消息**，即使你什么都没修：说明「微信桥异常」、`health` 的原因（翻译成中文）、建议的处理办法，并问用户是否要你处理。这一步不能省，否则用户完全不知道微信断了。
+   3. **必须在 Muse 聊天里给用户发一条消息**，即使你什么都没修：说明「微信桥异常」、`health` 的原因（翻译成中文）、建议的处理办法，并问用户是否要你处理。重装丢失的 unit 后改成告知已恢复即可。这一步不能省，否则用户完全不知道微信断了。
 
    **B. 原因是「微信有 N 条新事件」：**
    1. `~/.local/bin/wx-bot inbox pull --binding muse --lease 30m`，得到 `{"events": [...]}`。
@@ -79,3 +84,59 @@ wx-bot 跑在**你自己的运行环境**里（不是用户的 Mac），作为 s
    6. `send` 失败时按 [AGENTS.md 通用规则](../../AGENTS.md#通用规则)在 Muse 聊天里告诉用户；登录过期就重做第 3 步并重启服务。
 
 7. **告诉用户**：先用自己的微信给 ClawBot 发一条消息，之后就能对话。
+
+## 运行环境会被替换时
+
+有的运行环境会定期换成一台临时虚拟机：`/home` 还在，`/etc` 被清空。于是：
+
+- **还在（不用重新扫码）**：`~/.local/bin/wx-bot`、`~/.config/wx-bot/`（配置和 env）、`~/.local/state/wx-bot/`（登录态、收件箱）、`~/.local/bin/wx-bot-keepalive`
+- **没了**：`/etc/systemd/system/wx-bot.service`（第 4 步的系统 unit），服务不再自启
+
+`wx-bot-keepalive` 在 user unit 不存在时：有 `/etc` 下的 system unit 就 `sudo -n systemctl restart wx-bot`（`sudo -n` 失败则 nohup）；unit 也没了就 `setsid nohup wx-bot run`。只输出一行 `ok` / `restarted: …` / `NEED_USER: …`。nohup 能把收消息拉起来，但下次再换环境仍不会自启，所以还是要把 unit 装回去。
+
+**做法 A（推荐，默认 hook 不用改）**：第 5 步的 hook 在 `health --liveness` 失败时唤醒你。按 [断线排查](troubleshoot.md#服务没在运行) 做：
+
+```bash
+systemctl cat wx-bot
+```
+
+提示找不到 unit 时，先停掉 keepalive 可能留下的 nohup 进程，再重做第 4 步：
+
+```bash
+pkill -f "wx-bot.* run$" 2>/dev/null || true
+HOME_ABS="$(cd ~ && pwd)"
+USER_NAME="$(stat -c '%U' "$HOME_ABS" 2>/dev/null || id -un)"
+curl -fsSL https://raw.githubusercontent.com/lawrencewzen/wx-bot/main/adapters/muse/wx-bot.service \
+  | sed "s|__HOME__|${HOME_ABS}|g; s|__USER__|${USER_NAME}|g" \
+  | tee /etc/systemd/system/wx-bot.service >/dev/null
+systemctl daemon-reload && systemctl enable --now wx-bot
+```
+
+写 `/etc` 若 Permission denied，把 `tee` 改成 `sudo tee`，两条 `systemctl` 改成 `sudo systemctl`。然后等 15 秒：
+
+```bash
+~/.local/bin/wx-bot health --binding muse --grace 0
+```
+
+退出码为 0 即恢复。在 Muse 聊天里告诉用户：运行环境替换导致 systemd unit 丢失，已重装，登录态还在，不用扫码。
+
+**做法 B（hook 里先自拉起）**：检测脚本在 `health --liveness` 失败、准备 wake 时先跑一次 `wx-bot-keepalive`，收消息能马上恢复；仍要 wake，好让你按做法 A 把 unit 装回去。把第 5 步脚本里 liveness 那段换成：
+
+```sh
+if health="$("$WXBOT" health --binding "$BINDING" --liveness 2>&1)"; then
+	rm -f "$MARK"
+	echo "silent"
+elif [ -f "$MARK" ] && [ -z "$(find "$MARK" -mmin +60 2>/dev/null)" ]; then
+	echo "silent"
+else
+	ka=""
+	if [ -x "${HOME}/.local/bin/wx-bot-keepalive" ]; then
+		ka="$("${HOME}/.local/bin/wx-bot-keepalive" 2>&1 || true)"
+	fi
+	mkdir -p "$(dirname "$MARK")"
+	touch "$MARK"
+	echo "wake: wx-bot 异常：$health${ka:+；keepalive: $ka}"
+fi
+```
+
+keepalive 可能要跑十几秒（启动后再探活）。输出 `NEED_USER: …` 时把原因告诉用户；`restarted: …` 之后仍然按做法 A 重装 unit（先 `pkill` 再 `enable --now`，避免和 nohup 进程抢端口）。
