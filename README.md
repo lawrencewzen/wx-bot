@@ -35,7 +35,7 @@
 
 - **不丢消息**：先落盘到本地 SQLite 收件箱，再确认；投递失败自动重投。
 - **只出站**：不对外开端口，本地 API 只监听 loopback。
-- **默认白名单**：只理会扫码登录的那个微信号。
+- **只能本人使用**：只理会扫码登录的那个微信号，不支持好友。
 - **两种投递**：`webhook` 推给 Agent，`pull` 由 Agent 来取。
 - 收发文本、图片、语音（带转写）、文件、视频。支持 Linux / macOS。
 
@@ -69,7 +69,7 @@ curl -fsSL https://raw.githubusercontent.com/lawrencewzen/wx-bot/main/install.sh
 # 源码安装：git clone 后运行 ./install.sh --service（--service 同时装开机自启）
 ```
 
-编辑 `~/.config/wx-bot/config.json`，参考 [webhook 示例](examples/config.example.json) 或 [pull 示例](examples/config.pull.example.json)；密钥写进 `~/.config/wx-bot/env`，配置里用 `env:VAR` 引用。要放行别的微信号，见[白名单](docs/protocol.md#7-白名单)。
+编辑 `~/.config/wx-bot/config.json`，参考 [webhook 示例](examples/config.example.json) 或 [pull 示例](examples/config.pull.example.json)；密钥写进 `~/.config/wx-bot/env`，配置里用 `env:VAR` 引用。
 
 ```bash
 wx-bot login xiaox          # 微信扫码
@@ -116,6 +116,7 @@ v0.4.0 之前的版本，重跑一遍 `install.sh` 即可升级。也可以直�
 | 现象 | 处理 |
 | --- | --- |
 | Agent 收不到消息 | 先跑 `wx-bot health --grace 0`，按提示处理；详见[断线排查](docs/agents/troubleshoot.md) |
+| 好友发的消息收不到 | 预期行为，wx-bot 只能本人使用 |
 | `send` 报 `no context_token` | 对方还没给 ClawBot 发过消息，先发一条 |
 | 日志出现 `-14` / `expired` | 登录过期，重新 `wx-bot login <binding>` |
 | 只能走代理出网 | 把 `https_proxy` 写进 `~/.config/wx-bot/env`，重启服务 |

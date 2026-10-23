@@ -74,6 +74,9 @@ async function runMain(configPath: string): Promise<number> {
   const tasks: Promise<unknown>[] = [];
 
   for (const b of cfg.bindings) {
+    if (b.deprecated_allow_ignored) {
+      log("warn", "allow_wxids / forward_unallowed 已废弃并被忽略：wx-bot 只能扫码的本人使用", { binding: b.name });
+    }
     // Deliver queued events even while the binding is logged out or expired.
     if (b.delivery === DELIVERY_WEBHOOK) {
       if (!b.webhook.url) log("warn", "webhook.url empty; events stay in the inbox until it is set", { binding: b.name });
@@ -121,7 +124,6 @@ async function runMain(configPath: string): Promise<number> {
       inbox: box,
       media: fileMediaSink(cfg.media_dir),
       allow: lb.allow,
-      forwardUnallowed: b.forward_unallowed,
       log: (level, msg) => plog(level, msg),
       onQueued: (ev) => recordInbound(cfg, ev),
       onHealth: (h) => {

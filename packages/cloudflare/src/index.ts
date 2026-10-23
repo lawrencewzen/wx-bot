@@ -10,7 +10,7 @@
 //   GET  /b/<binding>/login            login progress
 //   PUT  /b/<binding>/session          import an existing session (migration)
 //   DELETE /b/<binding>/session        log out: stop polling, forget credentials
-//   GET|PUT /b/<binding>/config        delivery, webhook, allow_wxids
+//   GET|PUT /b/<binding>/config        delivery, webhook
 //   GET  /b/<binding>/media/<key>      download stored media
 //   /b/<binding>/v1/...                the standard API (send, status, events, ack)
 //
@@ -53,8 +53,6 @@ export interface Env {
 export interface BindingConfig {
   delivery: "webhook" | "pull";
   webhook?: WebhookConfig;
-  allow_wxids?: string[];
-  forward_unallowed?: boolean;
 }
 
 interface LoginState {
@@ -115,7 +113,11 @@ export class WxBinding extends DurableObject<Env> {
   }
 
   private async config(): Promise<BindingConfig> {
-    return (await this.ctx.storage.get<BindingConfig>(K.config)) ?? { delivery: "pull" };
+    const raw = (await this.ctx.storage.get<BindingConfig & { allow_wxids?: unknown; forward_unallowed?: unknown }>(K.config)) ?? {
+      delivery: "pull" as const,
+    };
+    const { allow_wxids: _a, forward_unallowed: _f, ...cfg } = raw;
+    return cfg;
   }
 
   private async session(): Promise<Session | undefined> {
@@ -134,7 +136,7 @@ export class WxBinding extends DurableObject<Env> {
   }
 
   private async allow(): Promise<Set<string>> {
-    return allowlist((await this.config()).allow_wxids, (await this.session())?.ilink_user_id ?? "");
+    return allowlist((await this.session())?.ilink_user_id ?? "");
   }
 
   private async useSession(s: Session, tokens: Record<string, string> = {}, cursor?: string) {
@@ -217,7 +219,8 @@ export class WxBinding extends DurableObject<Env> {
         return json(200, { ...c, webhook: c.webhook && { ...c.webhook, key: c.webhook.key ? "***" : "", secret: c.webhook.secret ? "***" : "" } });
       }
       if (path === "/config" && req.method === "PUT") {
-        const c = (await req.json()) as BindingConfig;
+        const incoming = (await req.json()) as BindingConfig & { allow_wxids?: unknown; forward_unallowed?: unknown };
+        const { allow_wxids: _a, forward_unallowed: _f, ...c } = incoming;
         if (c.delivery !== "webhook" && c.delivery !== "pull") throw new WxBotError("bad_request", 'delivery must be "webhook" or "pull"');
         if (c.delivery === "webhook" && !c.webhook?.url) throw new WxBotError("bad_request", "webhook.url is required for webhook delivery");
         await this.ctx.storage.put(K.config, c);
@@ -319,7 +322,6 @@ export class WxBinding extends DurableObject<Env> {
         client,
         inbox: this.inbox,
         allow: await this.allow(),
-        forwardUnallowed: cfg.forward_unallowed,
         media: this.mediaSink(),
         log: (level, msg) => console[level === "info" ? "log" : level](`[${name}] ${msg}`),
         store: {

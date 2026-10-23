@@ -29,7 +29,7 @@ export function openLive(cfg: Config, name: string): LiveBinding {
   }
   const client = new IlinkClient(session, { crypto: nodeCrypto });
   client.loadTokens(store.loadTokensSync());
-  return { name, config: b, store, session, client, allow: allowlist(b.allow_wxids, session.ilink_user_id) };
+  return { name, config: b, store, session, client, allow: allowlist(session.ilink_user_id) };
 }
 
 /** media_dir/<binding>/<YYYYMMDD>/<msgid>_<name>, files 0600, dirs 0700. */

@@ -58,7 +58,7 @@ export function statusOf(cfg: Config, b: Binding, box?: Inbox): BindingStatus {
       loginUser = s.ilink_user_id;
     } catch {}
   } catch {}
-  st.allowlist = [...allowlist(b.allow_wxids, loginUser)].sort();
+  st.allowlist = [...allowlist(loginUser)].sort();
   return st;
 }
 

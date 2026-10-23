@@ -40,7 +40,7 @@ function fake() {
 test("text is split and carries the context token", async () => {
   const f = fake();
   f.client.contextTokens.set("owner", "ctx");
-  await sendMessage(f.client, allowlist([], "owner"), { binding: "b", to: "owner", text: "x".repeat(4001) });
+  await sendMessage(f.client, allowlist("owner"), { binding: "b", to: "owner", text: "x".repeat(4001) });
   expect(f.sent.map((s) => s.msg.item_list[0].text_item.text.length)).toEqual([2000, 2000, 1]);
   const m = f.sent[0].msg;
   expect([m.from_user_id, m.to_user_id, m.context_token, m.message_type, m.message_state]).toEqual(["bot@im.bot", "owner", "ctx", 2, 2]);
@@ -51,7 +51,7 @@ test("file upload: encrypted body, md5, caption first, original name kept", asyn
   const f = fake();
   f.client.contextTokens.set("owner", "ctx");
   const data = new TextEncoder().encode("hello pdf bytes");
-  await sendMessage(f.client, allowlist([], "owner"), {
+  await sendMessage(f.client, allowlist("owner"), {
     binding: "b",
     to: "owner",
     caption: "见附件",
@@ -75,11 +75,12 @@ test("file upload: encrypted body, md5, caption first, original name kept", asyn
   expect(atob(item.file_item.media.aes_key)).toBe(up.aeskey);
 });
 
-test("allowlist and context token are enforced", async () => {
+test("non-owner recipient is forbidden; owner still needs a context token", async () => {
   const f = fake();
-  const allow = allowlist(["a"], "owner");
-  await expect(sendMessage(f.client, allow, { binding: "b", to: "owner", text: "x" })).rejects.toMatchObject({ kind: "forbidden" });
-  await expect(sendMessage(f.client, allow, { binding: "b", to: "a", text: "x" })).rejects.toMatchObject({ kind: "no_context" });
+  const allow = allowlist("owner");
+  expect([...allow]).toEqual(["owner"]);
+  await expect(sendMessage(f.client, allow, { binding: "b", to: "friend", text: "x" })).rejects.toMatchObject({ kind: "forbidden" });
+  await expect(sendMessage(f.client, allow, { binding: "b", to: "owner", text: "x" })).rejects.toMatchObject({ kind: "no_context" });
   expect(f.sent.length).toBe(0);
 });
 
@@ -88,7 +89,7 @@ test("expired session surfaces as kind expired", async () => {
   stops.push(srv.stop);
   const c = new IlinkClient({ bot_token: "t", base_url: srv.url, ilink_bot_id: "b", ilink_user_id: "o" });
   c.contextTokens.set("o", "ctx");
-  const err = await sendMessage(c, allowlist([], "o"), { binding: "b", to: "o", text: "x" }).catch((e) => e);
+  const err = await sendMessage(c, allowlist("o"), { binding: "b", to: "o", text: "x" }).catch((e) => e);
   expect(err).toBeInstanceOf(WxBotError);
   expect(err.kind).toBe("expired");
 });

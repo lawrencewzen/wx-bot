@@ -8,8 +8,7 @@
   "bindings": [
     {
       "name": "muse",
-      "delivery": "pull",
-      "allow_wxids": []
+      "delivery": "pull"
     }
   ]
 }

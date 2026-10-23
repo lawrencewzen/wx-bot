@@ -30,8 +30,7 @@ ghcr.io/lawrencewzen/wx-bot:<版本>      # 例如 0.4.4；也有 0.4 和 latest
       "webhook": {
         "url": "http://127.0.0.1:3000/channels/wechat/incoming",
         "key": "env:WECHAT_WEBHOOK_KEY"
-      },
-      "allow_wxids": []
+      }
     }
   ]
 }

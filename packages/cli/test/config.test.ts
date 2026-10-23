@@ -75,6 +75,26 @@ test("pull bindings", async () => {
   expect(pullBindings(c)).toEqual(["b"]);
 });
 
+test("legacy allow_wxids and forward_unallowed still parse and are ignored", async () => {
+  const c = await loadConfig(
+    writeCfg(
+      `{"bindings":[{"name":"xiaox","webhook":{"url":"https://x"},"allow_wxids":["wxid_friend"],"forward_unallowed":true}]}`,
+    ),
+  );
+  const b = c.bindings[0]!;
+  expect("allow_wxids" in b).toBe(false);
+  expect("forward_unallowed" in b).toBe(false);
+  expect(b.deprecated_allow_ignored).toBe(true);
+  expect(b.name).toBe("xiaox");
+});
+
+test("empty allow_wxids and false forward_unallowed do not warn", async () => {
+  const c = await loadConfig(
+    writeCfg(`{"bindings":[{"name":"xiaox","webhook":{"url":"https://x"},"allow_wxids":[],"forward_unallowed":false}]}`),
+  );
+  expect(c.bindings[0]!.deprecated_allow_ignored).toBeUndefined();
+});
+
 test("loopback listen", async () => {
   for (const ok of ["127.0.0.1:18790", "[::1]:18790", "localhost:9", "127.0.0.5:1"]) await checkLoopbackListen(ok);
   for (const bad of [":18790", "127.0.0.1", "10.0.0.1:80", "[::]:80"]) await expect(checkLoopbackListen(bad)).rejects.toThrow();

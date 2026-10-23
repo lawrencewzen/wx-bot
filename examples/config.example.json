@@ -14,9 +14,7 @@
         "key_header": "Authorization",
         "key_prefix": "Bearer ",
         "secret": "env:WXBOT_WEBHOOK_SECRET"
-      },
-      "allow_wxids": [],
-      "forward_unallowed": false
+      }
     }
   ]
 }

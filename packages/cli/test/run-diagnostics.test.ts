@@ -141,6 +141,39 @@ function writeRunEnv(baseUrl: string) {
   return { dir, config, logPath: join(dir, "run.log") };
 }
 
+test("run warns that allow_wxids / forward_unallowed are ignored", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "wxdep-"));
+  const state = join(dir, "state");
+  mkdirSync(state);
+  const config = join(dir, "config.json");
+  writeFileSync(
+    config,
+    JSON.stringify({
+      state_dir: state,
+      media_dir: join(dir, "media"),
+      local_api: { listen: "127.0.0.1:0", token: "t" },
+      bindings: [{ name: "muse", delivery: "pull", allow_wxids: ["wxid_friend"], forward_unallowed: true }],
+    }),
+  );
+  const logPath = join(dir, "run.log");
+  const fd = openSync(logPath, "w");
+  const proc = Bun.spawn([process.execPath, MAIN, "--config", config, "run"], { stdout: "ignore", stderr: fd });
+  childProcs.push(proc);
+  closeSync(fd);
+  const logText = () => {
+    try {
+      return readFileSync(logPath, "utf8");
+    } catch {
+      return "";
+    }
+  };
+  await until(() => logText().includes("wx-bot running"), 8_000, "run start");
+  expect(logText()).toContain("allow_wxids / forward_unallowed 已废弃并被忽略：wx-bot 只能扫码的本人使用");
+  expect(logText()).toContain("binding=muse");
+  process.kill(proc.pid!, "SIGTERM");
+  expect(await proc.exited).toBe(0);
+});
+
 test(
   "run survives a mid-poll socket drop, then SIGTERM leaves signal and exit logs",
   async () => {

@@ -57,7 +57,7 @@ curl -H "$H" $W/b/muse/v1/send -F binding=muse -F to=<from_wxid> -F image=@a.jpg
 curl -H "$H" $W/b/muse/v1/status
 ```
 
-`config` 里还可以设置 `allow_wxids`（默认只放行扫码的微信号）和 `forward_unallowed`，含义与命令行版相同。
+只能本人使用：只处理扫码登录的那个微信号发给 ClawBot 的消息，回复也只能发给它。PUT `/config` 里若仍带 `allow_wxids` / `forward_unallowed`，这两个字段会被忽略。
 
 ### 从命令行版迁移登录状态
 

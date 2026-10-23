@@ -17,10 +17,8 @@ export interface PollerOptions {
   store: PollerStore;
   inbox: Inbox;
   media: MediaSink;
-  /** wxids allowed to talk to the bot. */
+  /** wxids allowed to talk to the bot (the scanned login user). */
   allow: Set<string>;
-  /** Queue messages from non-allowlisted senders too (they still cannot be replied to). */
-  forwardUnallowed?: boolean;
   log?: (level: "info" | "warn" | "error", msg: string) => void;
   /** Called after every getupdates round: ok, or the error that made it fail. */
   onHealth?: (h: PollHealth) => void;
@@ -54,8 +52,8 @@ const sleep = (ms: number, signal?: AbortSignal) =>
  * batch (the inbox ignores duplicate event ids).
  */
 export class Poller {
-  private readonly o: Required<Omit<PollerOptions, "forwardUnallowed" | "log" | "onHealth" | "onQueued">> &
-    Pick<PollerOptions, "forwardUnallowed" | "log" | "onHealth" | "onQueued">;
+  private readonly o: Required<Omit<PollerOptions, "log" | "onHealth" | "onQueued">> &
+    Pick<PollerOptions, "log" | "onHealth" | "onQueued">;
 
   constructor(opts: PollerOptions) {
     this.o = {
@@ -160,12 +158,11 @@ export class Poller {
   private async handle(msg: IncomingMessage): Promise<void> {
     const o = this.o;
     const wxid = msg.from_user_id;
-    const allowed = o.allow.has(wxid);
-    if (!allowed) {
+    if (!o.allow.has(wxid)) {
       this.log("info", `unallowed sender ${wxid}`);
-      if (!o.forwardUnallowed) return;
+      return;
     }
-    if (msg.context_token && allowed) {
+    if (msg.context_token) {
       o.client.contextTokens.set(wxid, msg.context_token);
       try {
         await o.store.saveTokens(o.client.tokens());

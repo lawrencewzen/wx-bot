@@ -46,7 +46,7 @@ const memSink = (): MediaSink & { files: Map<string, Uint8Array> } => {
   return sink;
 };
 
-function setup(bodies: string[], opts: Partial<{ allow: string[] }> = {}) {
+function setup(bodies: string[], opts: Partial<{ allow: string[]; extra?: Record<string, unknown> }> = {}) {
   const il = fakeIlink(bodies);
   const client = new IlinkClient({ bot_token: "bot-secret", base_url: il.url, ilink_bot_id: "bot@im.bot", ilink_user_id: "wxid_owner" });
   const inbox = new Inbox(memorySql());
@@ -64,7 +64,8 @@ function setup(bodies: string[], opts: Partial<{ allow: string[] }> = {}) {
     retryDelayMs: 10,
     backoffDelayMs: 20,
     onHealth: (h) => health.push(h),
-  });
+    ...opts.extra,
+  } as ConstructorParameters<typeof Poller>[0]);
   const ctl = new AbortController();
   const done = poller.run(ctl.signal);
   const events = () =>
@@ -211,6 +212,28 @@ test("onQueued fires once for a new event and swallows callback errors", async (
   expect(logs.some(([level, msg]) => level === "warn" && msg.includes("onQueued") && msg.includes("disk full"))).toBe(true);
   const events = inbox.claim(["xiaox"], 100, 3_600_000).map((e) => JSON.parse(new TextDecoder().decode(e.payload)) as WxEvent);
   expect(events.length).toBe(1);
+});
+
+test("non-owner senders are not queued even if forwardUnallowed is true", async () => {
+  const body = JSON.stringify({
+    get_updates_buf: "c-drop",
+    msgs: [
+      {
+        message_id: 77,
+        from_user_id: "wxid_stranger",
+        context_token: "ctx-x",
+        item_list: [{ type: 1, text_item: { text: "nope" } }],
+      },
+    ],
+  });
+  const logs: [string, string][] = [];
+  const t = setup([body], { extra: { forwardUnallowed: true, log: (level: string, msg: string) => logs.push([level, msg]) } });
+  await until(() => t.s.cursor === "c-drop", 3000, "cursor");
+  t.ctl.abort();
+  await t.done;
+  expect(t.events().length).toBe(0);
+  expect(t.s.tokens).toEqual({});
+  expect(logs.some(([, msg]) => msg.includes("unallowed sender wxid_stranger"))).toBe(true);
 });
 
 test("deadline stops before a poll that would overrun", async () => {

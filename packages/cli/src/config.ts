@@ -21,8 +21,8 @@ export interface Binding {
   name: string;
   delivery: "webhook" | "pull";
   webhook: Webhook;
-  allow_wxids: string[];
-  forward_unallowed: boolean;
+  /** Set when JSON still had a non-empty allow_wxids or forward_unallowed: true. */
+  deprecated_allow_ignored?: true;
 }
 
 export interface Config {
@@ -44,6 +44,7 @@ export const findBinding = (c: Config, name: string) => c.bindings.find((b) => b
 const SHAPE = {
   root: ["state_dir", "media_dir", "local_api", "bindings", "chatlog_days"],
   local_api: ["listen", "token"],
+  // allow_wxids / forward_unallowed are accepted so old configs parse, then ignored.
   binding: ["name", "delivery", "webhook", "allow_wxids", "forward_unallowed"],
   webhook: ["url", "key", "key_header", "key_prefix", "secret"],
 };
@@ -60,6 +61,13 @@ function str(v: unknown, where: string): string {
   if (v === undefined || v === null) return "";
   if (typeof v !== "string") throw new Error(`parse config: ${where} must be a string`);
   return v;
+}
+
+/** True when old allow_wxids / forward_unallowed still have a value that would have changed behaviour. */
+function deprecatedAllowIgnored(raw: { allow_wxids?: unknown; forward_unallowed?: unknown }): boolean {
+  const ids = raw.allow_wxids;
+  if (Array.isArray(ids) && ids.some((x) => x != null && x !== "")) return true;
+  return raw.forward_unallowed === true;
 }
 
 /** Absent → 0 (off). Non-integers and negatives are config errors. */
@@ -140,9 +148,7 @@ export function parseConfig(text: string): Config {
       checkKeys(b, SHAPE.binding, `bindings[${i}]`);
       checkKeys(b.webhook, SHAPE.webhook, `bindings[${i}].webhook`);
       const w = b.webhook ?? {};
-      const allow = b.allow_wxids ?? [];
-      if (!Array.isArray(allow)) throw new Error(`parse config: bindings[${i}].allow_wxids must be an array`);
-      return {
+      const parsed: Binding = {
         name: ex(str(b.name, `bindings[${i}].name`), `bindings[${i}].name`),
         delivery: str(b.delivery, `bindings[${i}].delivery`) as Binding["delivery"],
         webhook: {
@@ -152,9 +158,9 @@ export function parseConfig(text: string): Config {
           key_prefix: ex(str(w.key_prefix, "key_prefix"), `bindings[${i}].webhook.key_prefix`),
           secret: ex(str(w.secret, "secret"), `bindings[${i}].webhook.secret`),
         },
-        allow_wxids: allow.map((a: unknown, j: number) => ex(str(a, "allow_wxids"), `bindings[${i}].allow_wxids[${j}]`)),
-        forward_unallowed: b.forward_unallowed === true,
       };
+      if (deprecatedAllowIgnored(b)) parsed.deprecated_allow_ignored = true;
+      return parsed;
     }),
   };
 

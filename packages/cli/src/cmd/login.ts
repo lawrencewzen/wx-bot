@@ -117,7 +117,6 @@ export async function cmdLogin(configPath: string, args: string[]): Promise<numb
     console.error(`wx-bot login: save session: ${(err as Error).message}`);
     return 1;
   }
-  const allow = b.allow_wxids.length > 0 ? b.allow_wxids.join(", ") : session.ilink_user_id;
-  console.log(`login ok\nbinding: ${name}\nilink_user_id: ${session.ilink_user_id}\nallowlist: ${allow}`);
+  console.log(`login ok\nbinding: ${name}\nilink_user_id: ${session.ilink_user_id}\nallowlist: ${session.ilink_user_id}`);
   return 0;
 }

@@ -21,10 +21,9 @@ export interface SendRequest {
   caption?: string;
 }
 
-/** wxids allowed to talk to a binding: allow_wxids, or the login user when empty. */
-export function allowlist(allowWxids: string[] | undefined, loginUserId: string): Set<string> {
-  const ids = (allowWxids ?? []).filter(Boolean);
-  return new Set(ids.length > 0 ? ids : loginUserId ? [loginUserId] : []);
+/** The scanned login user is the only wxid that may talk to a binding. */
+export function allowlist(loginUserId: string): Set<string> {
+  return new Set(loginUserId ? [loginUserId] : []);
 }
 
 /** Exactly one of text / image / file / video. */
