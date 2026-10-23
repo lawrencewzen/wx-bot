@@ -23,6 +23,12 @@ test("valid config gets defaults", async () => {
   expect(c.bindings[0]!.webhook.key_prefix).toBe("Bearer ");
   expect(c.bindings[0]!.delivery).toBe("webhook");
   expect(inboxPath(c).endsWith("inbox.db")).toBe(true);
+  expect(c.chatlog_days).toBe(0);
+});
+
+test("chatlog_days accepts a positive integer", async () => {
+  const c = await loadConfig(writeCfg(`{"chatlog_days":7,"bindings":[]}`));
+  expect(c.chatlog_days).toBe(7);
 });
 
 test("env expansion and ~", async () => {
@@ -46,6 +52,9 @@ test.each([
   [`{"nope":true,"bindings":[]}`, "unknown field"],
   [`{"bindings":[{"name":"a","webhook":{"url":"https://x","bogus":1}}]}`, "unknown field"],
   [`{"bindings":[{"name":"a","delivery":"exec"}]}`, "delivery"],
+  [`{"chatlog_days":-1,"bindings":[]}`, "chatlog_days"],
+  [`{"chatlog_days":1.5,"bindings":[]}`, "chatlog_days"],
+  [`{"chatlog_days":"7","bindings":[]}`, "chatlog_days"],
 ])("rejects %s", async (body, want) => {
   await expect(loadConfig(writeCfg(body))).rejects.toThrow(want);
 });

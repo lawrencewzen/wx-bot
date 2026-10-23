@@ -30,6 +30,8 @@ export interface Config {
   media_dir: string;
   local_api: { listen: string; token: string };
   bindings: Binding[];
+  /** Days of chat logs to keep. 0 (default) disables writing. */
+  chatlog_days: number;
 }
 
 export const defaultConfigPath = () => join(homedir(), ".config", "wx-bot", "config.json");
@@ -40,7 +42,7 @@ export const findBinding = (c: Config, name: string) => c.bindings.find((b) => b
 
 // Allowed keys at each level; anything else is rejected (Go: DisallowUnknownFields).
 const SHAPE = {
-  root: ["state_dir", "media_dir", "local_api", "bindings"],
+  root: ["state_dir", "media_dir", "local_api", "bindings", "chatlog_days"],
   local_api: ["listen", "token"],
   binding: ["name", "delivery", "webhook", "allow_wxids", "forward_unallowed"],
   webhook: ["url", "key", "key_header", "key_prefix", "secret"],
@@ -57,6 +59,15 @@ function checkKeys(obj: unknown, allowed: string[], where: string) {
 function str(v: unknown, where: string): string {
   if (v === undefined || v === null) return "";
   if (typeof v !== "string") throw new Error(`parse config: ${where} must be a string`);
+  return v;
+}
+
+/** Absent → 0 (off). Non-integers and negatives are config errors. */
+function chatlogDays(v: unknown): number {
+  if (v === undefined || v === null) return 0;
+  if (typeof v !== "number" || !Number.isInteger(v) || v < 0) {
+    throw new Error("parse config: chatlog_days must be a non-negative integer");
+  }
   return v;
 }
 
@@ -124,6 +135,7 @@ export function parseConfig(text: string): Config {
       listen: ex(str(raw.local_api?.listen, "local_api.listen"), "local_api.listen"),
       token: ex(str(raw.local_api?.token, "local_api.token"), "local_api.token"),
     },
+    chatlog_days: chatlogDays(raw.chatlog_days),
     bindings: bindingsRaw.map((b, i) => {
       checkKeys(b, SHAPE.binding, `bindings[${i}]`);
       checkKeys(b.webhook, SHAPE.webhook, `bindings[${i}].webhook`);

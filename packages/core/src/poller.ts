@@ -1,5 +1,5 @@
 import type { IlinkClient } from "./client.ts";
-import { buildEvent, encodeEvent, type MediaSink } from "./events.ts";
+import { buildEvent, encodeEvent, type MediaSink, type WxEvent } from "./events.ts";
 import type { Inbox } from "./inbox.ts";
 import { ERR_CODE_EXPIRED, type IncomingMessage } from "./types.ts";
 
@@ -24,6 +24,8 @@ export interface PollerOptions {
   log?: (level: "info" | "warn" | "error", msg: string) => void;
   /** Called after every getupdates round: ok, or the error that made it fail. */
   onHealth?: (h: PollHealth) => void;
+  /** Called after a new event is queued (duplicates skipped). Errors are logged, not thrown. */
+  onQueued?: (ev: WxEvent) => void | Promise<void>;
   pollTimeoutMs?: number;
   retryDelayMs?: number;
   backoffDelayMs?: number;
@@ -52,8 +54,8 @@ const sleep = (ms: number, signal?: AbortSignal) =>
  * batch (the inbox ignores duplicate event ids).
  */
 export class Poller {
-  private readonly o: Required<Omit<PollerOptions, "forwardUnallowed" | "log" | "onHealth">> &
-    Pick<PollerOptions, "forwardUnallowed" | "log" | "onHealth">;
+  private readonly o: Required<Omit<PollerOptions, "forwardUnallowed" | "log" | "onHealth" | "onQueued">> &
+    Pick<PollerOptions, "forwardUnallowed" | "log" | "onHealth" | "onQueued">;
 
   constructor(opts: PollerOptions) {
     this.o = {
@@ -172,6 +174,11 @@ export class Poller {
       }
     }
     const ev = await buildEvent(o.binding, msg, o.client, o.media, (m) => this.log("warn", m));
-    o.inbox.add(o.binding, ev.event_id, encodeEvent(ev));
+    if (!o.inbox.add(o.binding, ev.event_id, encodeEvent(ev))) return;
+    try {
+      await o.onQueued?.(ev);
+    } catch (err) {
+      this.log("warn", `onQueued: ${(err as Error).message}`);
+    }
   }
 }

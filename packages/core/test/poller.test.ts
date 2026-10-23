@@ -173,6 +173,46 @@ test("queue failure keeps cursor", async () => {
   expect(t.health[0]).toEqual({ ok: false, error: "queue message: disk full" });
 });
 
+test("onQueued fires once for a new event and swallows callback errors", async () => {
+  const msg = { message_id: 41, from_user_id: "wxid_owner", create_time_ms: 1760000000000, item_list: [{ type: 1, text_item: { text: "hi" } }] };
+  const queued: WxEvent[] = [];
+  const logs: [string, string][] = [];
+  const il = fakeIlink([
+    JSON.stringify({ get_updates_buf: "c1", msgs: [msg] }),
+    JSON.stringify({ get_updates_buf: "c2", msgs: [msg] }),
+  ]);
+  const client = new IlinkClient({ bot_token: "bot-secret", base_url: il.url, ilink_bot_id: "bot@im.bot", ilink_user_id: "wxid_owner" });
+  const inbox = new Inbox(memorySql());
+  const { s, store } = memStore();
+  const poller = new Poller({
+    binding: "xiaox",
+    client,
+    store,
+    inbox,
+    media: memSink(),
+    allow: new Set(["wxid_owner"]),
+    pollTimeoutMs: 200,
+    retryDelayMs: 10,
+    backoffDelayMs: 20,
+    log: (level, msg) => logs.push([level, msg]),
+    onQueued: (ev) => {
+      queued.push(ev);
+      throw new Error("disk full");
+    },
+  });
+  const ctl = new AbortController();
+  const done = poller.run(ctl.signal);
+  await until(() => s.cursor === "c2", 3000, "cursor c2");
+  ctl.abort();
+  await done;
+  expect(queued.length).toBe(1);
+  expect(queued[0]!.event_id).toBe("xiaox:41");
+  expect(queued[0]!.kind).toBe("message");
+  expect(logs.some(([level, msg]) => level === "warn" && msg.includes("onQueued") && msg.includes("disk full"))).toBe(true);
+  const events = inbox.claim(["xiaox"], 100, 3_600_000).map((e) => JSON.parse(new TextDecoder().decode(e.payload)) as WxEvent);
+  expect(events.length).toBe(1);
+});
+
 test("deadline stops before a poll that would overrun", async () => {
   const t = setup([]);
   t.ctl.abort();

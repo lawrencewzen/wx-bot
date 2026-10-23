@@ -167,7 +167,7 @@ async function parseSend(req: Request, o: ApiOptions): Promise<SendRequest> {
   const path = (b.image || b.video || b.file)!;
   if (!o.readLocalFile) throw new WxBotError("bad_request", `${kind} paths are not supported here; upload the file as multipart/form-data`);
   const f = await o.readLocalFile(path);
-  out.media = { kind, data: f.data, fileName: f.fileName };
+  out.media = { kind, data: f.data, fileName: f.fileName, path };
   return out;
 }
 

@@ -9,6 +9,8 @@ export interface OutgoingMedia {
   kind: MediaKind;
   data: Uint8Array;
   fileName: string;
+  /** Absolute path when the caller had one (CLI / JSON local API). Omitted for uploads. */
+  path?: string;
 }
 
 export interface SendRequest {

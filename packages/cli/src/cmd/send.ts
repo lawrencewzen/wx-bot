@@ -1,6 +1,7 @@
 import { MAX_MEDIA_BYTES, sendMessage, validateSend, WxBotError, type MediaKind, type SendRequest } from "@wx-bot/core";
 import { readFileSync, statSync } from "node:fs";
 import { basename, resolve } from "node:path";
+import { recordOutbound } from "../chatlog.ts";
 import { loadConfig, type Config } from "../config.ts";
 import { FlagError, parseFlags, usageLines } from "../flags.ts";
 import { openLive } from "../live.ts";
@@ -74,19 +75,20 @@ export async function cmdSend(configPath: string, args: string[]): Promise<numbe
     if (local.error) return console.error(`wx-bot send: ${local.error}`), 1;
     return console.log("sent"), 0;
   }
+  const req: SendRequest = { binding: v.binding, to: v.to, caption: v.caption || undefined };
   try {
     const lb = openLive(cfg, v.binding);
-    const req: SendRequest = { binding: v.binding, to: v.to, caption: v.caption || undefined };
     if (v.text) req.text = v.text;
     else {
       const kind: MediaKind = v.image ? "image" : v.video ? "video" : "file";
       const f = readMedia(v[kind]);
-      req.media = { kind, data: f.data, fileName: f.fileName };
+      req.media = { kind, data: f.data, fileName: f.fileName, path: v[kind] };
     }
     await sendMessage(lb.client, lb.allow, req);
   } catch (err) {
     return console.error(`wx-bot send: ${(err as Error).message}`), 1;
   }
+  recordOutbound(cfg, req, "agent");
   console.log("sent");
   return 0;
 }

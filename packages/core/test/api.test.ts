@@ -51,7 +51,7 @@ test("send json, validation and error mapping", async () => {
 test("send json with a local path uses readLocalFile", async () => {
   const a = api({ readLocalFile: async (p) => ({ data: enc("img"), fileName: p.split("/").pop()! }) });
   await a.call("POST", "/v1/send", JSON.stringify({ binding: "b", to: "w", image: "/tmp/a.png", caption: "c" }));
-  expect(a.sent[0]!.media).toMatchObject({ kind: "image", fileName: "a.png" });
+  expect(a.sent[0]!.media).toMatchObject({ kind: "image", fileName: "a.png", path: "/tmp/a.png" });
   expect(a.sent[0]!.caption).toBe("c");
 });
 

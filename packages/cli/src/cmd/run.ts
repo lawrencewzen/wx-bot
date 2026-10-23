@@ -13,6 +13,7 @@ import {
   type Inbox,
   type SendRequest,
 } from "@wx-bot/core";
+import { pruneChatlog, recordInbound, recordOutbound } from "../chatlog.ts";
 import { DELIVERY_WEBHOOK, inboxPath, loadConfig, type Config } from "../config.ts";
 import { mkdir0700 } from "../fsutil.ts";
 import { HealthWriter, healthPath } from "../health.ts";
@@ -122,6 +123,7 @@ async function runMain(configPath: string): Promise<number> {
       allow: lb.allow,
       forwardUnallowed: b.forward_unallowed,
       log: (level, msg) => plog(level, msg),
+      onQueued: (ev) => recordInbound(cfg, ev),
       onHealth: (h) => {
         health.update(h);
         const a = alerts.update(h);
@@ -154,14 +156,15 @@ async function runMain(configPath: string): Promise<number> {
         }
       }),
     );
-    tasks.push(stallWatch(box, lb, ctl.signal));
+    tasks.push(stallWatch(box, lb, cfg, ctl.signal));
   }
 
-  tasks.push(pruneLoop(box, ctl.signal));
+  tasks.push(pruneLoop(box, cfg, ctl.signal));
 
   const send = async (req: SendRequest) => {
     const lb = live.get(req.binding) ?? openLive(cfg, req.binding);
     await sendMessage(lb.client, lb.allow, req);
+    recordOutbound(cfg, req, "agent");
   };
   const [host, port] = splitListen(cfg.local_api.listen);
   const handler = createApiHandler({
@@ -236,7 +239,7 @@ async function webhookWorker(box: Inbox, binding: string, cfg: Config, signal: A
  * Tell the WeChat owner when queued messages sit untaken for AGENT_STALL_MS
  * (agent down, webhook failing), and again when they move.
  */
-async function stallWatch(box: Inbox, lb: LiveBinding, signal: AbortSignal) {
+async function stallWatch(box: Inbox, lb: LiveBinding, cfg: Config, signal: AbortSignal) {
   const slog = logger({ component: "stallwatch", binding: lb.name });
   const owner = lb.session.ilink_user_id;
   let notified = false;
@@ -244,13 +247,16 @@ async function stallWatch(box: Inbox, lb: LiveBinding, signal: AbortSignal) {
     try {
       const n = box.waiting(lb.name, AGENT_STALL_MS);
       if (n > 0 && !notified && owner) {
-        await lb.client.sendText(owner, agentStalledText(lb.name, n, AGENT_STALL_MS / 60_000));
+        const text = agentStalledText(lb.name, n, AGENT_STALL_MS / 60_000);
+        await lb.client.sendText(owner, text);
         notified = true;
         slog("warn", "told the owner the agent is not taking messages", { waiting: n });
+        recordOutbound(cfg, { binding: lb.name, to: owner, text }, "wx-bot");
       } else if (n === 0 && notified) {
         notified = false;
         await lb.client.sendText(owner, AGENT_RECOVERED_TEXT);
         slog("info", "told the owner the agent recovered");
+        recordOutbound(cfg, { binding: lb.name, to: owner, text: AGENT_RECOVERED_TEXT }, "wx-bot");
       }
     } catch (err) {
       slog("warn", "owner notice", { err: (err as Error).message });
@@ -259,7 +265,7 @@ async function stallWatch(box: Inbox, lb: LiveBinding, signal: AbortSignal) {
   }
 }
 
-async function pruneLoop(box: Inbox, signal: AbortSignal) {
+async function pruneLoop(box: Inbox, cfg: Config, signal: AbortSignal) {
   while (!signal.aborted) {
     try {
       const { expired, deleted } = box.prune(INBOX_RETENTION_MS);
@@ -267,6 +273,11 @@ async function pruneLoop(box: Inbox, signal: AbortSignal) {
       if (deleted > 0) log("info", "pruned inbox", { deleted });
     } catch (err) {
       log("error", "prune inbox", { err: (err as Error).message });
+    }
+    try {
+      pruneChatlog(cfg);
+    } catch (err) {
+      log("error", "prune chatlog", { err: (err as Error).message });
     }
     await sleep(3_600_000, signal);
   }
