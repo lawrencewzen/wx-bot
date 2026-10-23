@@ -97,13 +97,14 @@ wx-bot send --binding xiaox --to <wxid> --image ./a.jpg   # 还有 --file / --vi
 | 做什么 | 命令 |
 | --- | --- |
 | 看状态 | `wx-bot status` |
+| 查微信聊天记录 | `wx-bot chatlog [--since 24h] [--with wxid]` |
 | 排查收不到消息 | `wx-bot health --grace 0` |
 | 重放已放弃（dead）的消息 | `wx-bot inbox requeue [--binding B] [event_id...]` |
 | 升级（不用重新扫码） | `wx-bot update` |
 | 回滚 | `wx-bot update --version <版本>` |
 | 卸载 | `wx-bot uninstall --yes`（加 `--keep-data` 保留登录） |
 
-配置项 `chatlog_days`（整数，默认 `0` 关闭）开启后，收发原文按天追加到 `<state_dir>/chatlog/<binding>/<YYYY-MM-DD>.jsonl`，并保留最近 N 天；改回 `0` 只停止写入，不删已有文件。聊天记录是隐私数据，默认不写。
+配置项 `chatlog_days`（整数，默认 `0` 关闭）开启后，收发原文按天追加到 `<state_dir>/chatlog/<binding>/<YYYY-MM-DD>.jsonl`，并保留最近 N 天；改回 `0` 只停止写入，不删已有文件。聊天记录是隐私数据，默认不写。查询用 `wx-bot chatlog --since 24h`（可加 `--with <wxid>`、`--binding`、`--limit`、`--json`）；未开启且没有历史文件时退出码 1，并提示如何打开。
 
 v0.4.0 之前的版本，重跑一遍 `install.sh` 即可升级。也可以直接让 Agent「把 wx-bot 升级到最新版」。
 

@@ -30,3 +30,4 @@
 - **事件的 `kind` 为 `alert` 时，它不是微信消息，而是 wx-bot 的异常通知**（连不上微信、登录过期、已恢复）：把 `alert.message` 和 `alert.hint` 用中文告诉用户，发在**你自己的聊天里**，不要用 `wx-bot send` 回微信（这时微信通常不可用）。然后照常确认（pull 模式 ack，webhook 正常结束）。
 - `wx-bot send` 失败：提示 `no context_token` 表示用户还没先给 ClawBot 发过消息；提示 `expired` 或 `-14` 表示登录过期，需要重新扫码。都在你自己的聊天里告诉用户，不要反复重试。
 - 装好或重启服务后，等 15 秒运行 `~/.local/bin/wx-bot health --grace 0`，**退出码为 0 才算装好**。不是 0 就按它输出的提示和[断线排查](docs/agents/troubleshoot.md)处理，不要只看服务是 active 就告诉用户装好了。
+- 用户在你自己的聊天里问微信里聊过什么时，运行 `~/.local/bin/wx-bot chatlog --since 24h`（可加 `--with <wxid>`），据此回答。命令提示未开启时，告诉用户可以在 `config.json` 根级设置 `"chatlog_days": 30` 后重启 `wx-bot run`。

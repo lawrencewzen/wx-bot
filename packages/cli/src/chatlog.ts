@@ -1,4 +1,4 @@
-import { chmodSync, closeSync, constants, existsSync, fsyncSync, openSync, readdirSync, rmSync, statSync, writeSync } from "node:fs";
+import { chmodSync, closeSync, constants, existsSync, fsyncSync, openSync, readFileSync, readdirSync, rmSync, statSync, writeSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { SendRequest, WxEvent } from "@wx-bot/core";
 import type { Config } from "./config.ts";
@@ -37,9 +37,101 @@ export function chatlogPath(cfg: Config, binding: string, tsMs: number): string 
   return join(cfg.state_dir, "chatlog", binding, `${localDay(tsMs)}.jsonl`);
 }
 
-function addLocalDays(ymd: string, n: number): string {
+export function addLocalDays(ymd: string, n: number): string {
   const [ys, ms, ds] = ymd.split("-");
   return localDay(new Date(Number(ys), Number(ms) - 1, Number(ds) + n).getTime());
+}
+
+export function chatlogRoot(cfg: Config): string {
+  return join(cfg.state_dir, "chatlog");
+}
+
+/** Local calendar dates whose files can overlap [fromMs, toMs]. */
+export function localDaysOverlapping(fromMs: number, toMs: number): string[] {
+  if (toMs < fromMs) return [];
+  const days: string[] = [];
+  let d = localDay(fromMs);
+  const end = localDay(toMs);
+  while (d <= end) {
+    days.push(d);
+    d = addLocalDays(d, 1);
+  }
+  return days;
+}
+
+function listBindingDirs(root: string): string[] {
+  if (!existsSync(root)) return [];
+  return readdirSync(root)
+    .filter((n) => {
+      try {
+        return statSync(join(root, n)).isDirectory();
+      } catch {
+        return false;
+      }
+    })
+    .sort();
+}
+
+/** True if any JSONL file exists under the chatlog directory. */
+export function hasChatlogFiles(cfg: Config): boolean {
+  const root = chatlogRoot(cfg);
+  if (!existsSync(root)) return false;
+  for (const name of listBindingDirs(root)) {
+    try {
+      for (const f of readdirSync(join(root, name))) {
+        if (f.endsWith(".jsonl")) return true;
+      }
+    } catch {}
+  }
+  return false;
+}
+
+function readChatlogFile(path: string): ChatlogRecord[] {
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch {
+    return [];
+  }
+  const out: ChatlogRecord[] = [];
+  for (const line of text.split("\n")) {
+    const t = line.trim();
+    if (!t) continue;
+    try {
+      const rec = JSON.parse(t) as ChatlogRecord;
+      if (rec && typeof rec === "object" && !Array.isArray(rec)) out.push(rec);
+    } catch {
+      // skip malformed lines
+    }
+  }
+  return out;
+}
+
+export interface ChatlogQuery {
+  sinceMs: number;
+  untilMs: number;
+  binding?: string;
+  with?: string;
+  limit: number;
+}
+
+/** Merge records from date files that overlap the window, oldest first. */
+export function queryChatlog(cfg: Config, q: ChatlogQuery): ChatlogRecord[] {
+  const root = chatlogRoot(cfg);
+  const bindings = q.binding ? [q.binding] : listBindingDirs(root);
+  const recs: ChatlogRecord[] = [];
+  for (const binding of bindings) {
+    for (const day of localDaysOverlapping(q.sinceMs, q.untilMs)) {
+      for (const rec of readChatlogFile(join(root, binding, `${day}.jsonl`))) {
+        if (typeof rec.ts !== "number") continue;
+        if (rec.ts < q.sinceMs || rec.ts > q.untilMs) continue;
+        if (q.with && rec.wxid !== q.with) continue;
+        recs.push(rec);
+      }
+    }
+  }
+  recs.sort((a, b) => a.ts - b.ts);
+  return q.limit < recs.length ? recs.slice(recs.length - q.limit) : recs;
 }
 
 function encodeMedia(m: ChatlogMedia): Record<string, unknown> {

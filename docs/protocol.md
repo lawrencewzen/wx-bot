@@ -255,12 +255,44 @@ image=@a.jpg   或 file=@a.pdf   或 video=@a.mp4   （最多一个文件，≤ 
 - `webhook.key` 与 `local_api.token` 使用不同的随机值。
 - `state_dir` 必须持久化：其中有登录会话、游标和收件箱（`inbox.db`）。
 
-## 9. 版本规则
+## 9. 聊天记录（可选）
+
+默认不记录。根配置 `chatlog_days` 为正整数时，wx-bot 把收发原文按天追加到本机 JSONL，供 Agent 事后查询（用户在 Agent 自己的聊天里问「微信里聊了啥」）。
+
+| 项 | 说明 |
+| --- | --- |
+| 配置 | `chatlog_days`：保留天数；缺省或 `0` 关闭写入 |
+| 路径 | `<state_dir>/chatlog/<binding>/<YYYY-MM-DD>.jsonl`（本机时区，按记录时间取日期） |
+| 权限 | 目录 `0700`，文件 `0600` |
+| 清理 | 保留最近 N 天的日期文件；改回 `0` 只停止写入，不删已有文件 |
+
+每行一条 JSON，字段与写入时一致：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `ts` | number | Unix 毫秒 |
+| `dir` | string | `in`（收到）或 `out`（发出） |
+| `binding` | string | 绑定名 |
+| `wxid` | string | 对端微信号 |
+| `event_id` | string | 入站事件 id，可选 |
+| `by` | string | 出站来源：`agent` 或 `wx-bot`（stall 通知等），可选 |
+| `text` | string | 文本，可选 |
+| `voice_text` | string | 语音转写，可选 |
+| `media` | array | `{type, path?, file_name}`，`type` 为 `image` / `voice` / `file` / `video` |
+| `caption` | string | 媒体说明，可选 |
+
+```bash
+wx-bot chatlog [--binding B] [--since 24h] [--with <wxid>] [--limit 200] [--json]
+```
+
+`--since` 为 Go 风格时长（`30m`、`24h`），另支持 `3d` 这种整天数（N×24h）。不给 `--binding` 时读所有 binding 目录；`--with` 只看与该 wxid 的收发。默认打印文本（给 Agent 看）；`--json` 打印 `{"records":[...]}`，元素是文件里的原始记录。未开启且没有任何历史文件时退出码 1，并提示在 `config.json` 根级设置 `"chatlog_days": 30` 后重启 `wx-bot run`。
+
+## 10. 版本规则
 
 - v1 内只**新增**字段，不删除、不改变已有字段含义；Agent 应忽略不认识的字段。
 - 不兼容的变更发布为 v2，通过 `schema` 字段区分。
 
-## 10. 对接清单
+## 11. 对接清单
 
 - [ ] 选定投递方式（webhook / pull），能收到入站事件
 - [ ] webhook：校验 `Authorization`（及可选签名），15 秒内返回 2xx
