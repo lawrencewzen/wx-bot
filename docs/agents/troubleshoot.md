@@ -22,16 +22,25 @@
 
 ## 服务没在运行
 
-先看 unit 还在不在：
+先确认你是 Muse 还是 Grok（[AGENTS.md](../../AGENTS.md)），**只执行自己那一节**。Grok 的 unit 在 `~/.config/systemd/user/wx-bot.service`（[Grok 第 1 步](grok.md) `./install.sh --service`），机器上本来就没有 `/etc/systemd/system/wx-bot.service`，`systemctl cat wx-bot`（不加 `--user`）找不到是正常的，不要去装 Muse 的系统 unit。Muse 不要跑 `install.sh --service`。
+
+### Muse
 
 ```bash
-systemctl cat wx-bot          # Muse 的系统 unit（/etc/systemd/system/wx-bot.service）
-systemctl --user cat wx-bot   # Grok 的 user unit
+systemctl cat wx-bot
 ```
 
-**找得到 unit：** `systemctl status wx-bot`（Grok 用 `systemctl --user`）看原因，日志用 `journalctl -u wx-bot -n 50`（Grok 加 `--user`），修好后按上面的命令重启。
+**找得到 unit：**
 
-**`systemctl cat wx-bot` 提示找不到 unit**（运行环境被替换、`/etc` 被清空）：二进制、配置、登录态都在 home 下，**不用重新扫码**。先停掉 keepalive 可能留下的 nohup 进程，再按 [Muse 第 4 步](muse.md) 重装 unit 并 `enable --now`：
+```bash
+systemctl status wx-bot --no-pager
+journalctl -u wx-bot -n 50
+sudo systemctl restart wx-bot
+```
+
+修好后再跑一次 `~/.local/bin/wx-bot health --grace 0`。
+
+**找不到 unit**（运行环境被替换、`/etc` 被清空）：二进制、配置、登录态都在 home 下，**不用重新扫码**。先停掉 keepalive 可能留下的 nohup 进程，再按 [Muse 第 4 步](muse.md) 重装系统 unit 并 `enable --now`：
 
 ```bash
 pkill -f "wx-bot.* run$" 2>/dev/null || true
@@ -51,6 +60,39 @@ systemctl status wx-bot --no-pager
 ```
 
 退出码必须为 0。这不是用户故意停服务，直接重装，不必先问。在你自己的聊天里告诉用户：运行环境替换导致 systemd unit 丢失，已重装，登录态还在，不用扫码。
+
+### Grok
+
+```bash
+systemctl --user cat wx-bot
+```
+
+**找得到 unit：**
+
+```bash
+systemctl --user status wx-bot --no-pager
+journalctl --user -u wx-bot -n 50
+systemctl --user restart wx-bot
+```
+
+修好后再跑一次 `~/.local/bin/wx-bot health --grace 0`。
+
+**找不到 unit：** 配置和登录态都在，**不用重新扫码**。按 [Grok 第 1 步](grok.md) 的 `--service` 重装 user unit（没有仓库时用下面这条，等价于 clone 后 `./install.sh --service`），再按第 7 步 enable：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/lawrencewzen/wx-bot/main/install.sh | bash -s -- --service
+systemctl --user enable --now wx-bot
+loginctl enable-linger "$(id -un)"
+loginctl show-user "$(id -un)" -p Linger
+```
+
+`Linger` 应为 `yes`。如果报 `System has not been booted with systemd` 或没有 `systemctl`，不要装系统 unit，改走下面「不能用 systemd」。装好后等 15 秒：
+
+```bash
+~/.local/bin/wx-bot health --grace 0
+```
+
+退出码必须为 0。在聊天里告诉用户：已重装 user unit，登录态还在，不用扫码。
 
 **不能用 systemd**（没有 `systemctl`，或上面安装失败）时，不要反复 `systemctl restart`，直接运行：
 
