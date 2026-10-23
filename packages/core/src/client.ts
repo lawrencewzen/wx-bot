@@ -26,6 +26,8 @@ export interface ClientOptions {
   cdnBase?: string;
   /** Per-request timeout for ordinary API calls (default 15s). */
   timeoutMs?: number;
+  /** Backoff between CDN download retries (default 1s, then 3s). */
+  downloadRetryDelaysMs?: number[];
 }
 
 export interface MediaToSend {
@@ -37,6 +39,10 @@ export interface MediaToSend {
 }
 
 const UPLOAD_TIMEOUT_MS = 5 * 60_000;
+/** One CDN download attempt; 5 minutes usually means a stuck connection. */
+const DOWNLOAD_ATTEMPT_TIMEOUT_MS = 90_000;
+const DOWNLOAD_MAX_ATTEMPTS = 3;
+const DOWNLOAD_RETRY_DELAYS_MS = [1_000, 3_000];
 
 /** Talks to the iLink bot API for one logged-in binding. */
 export class IlinkClient {
@@ -47,6 +53,7 @@ export class IlinkClient {
   private readonly crypto: MediaCrypto;
   private readonly cdnBase: string;
   private readonly timeoutMs: number;
+  private readonly downloadRetryDelaysMs: number[];
   /** Latest context_token per wxid; required to reply. */
   readonly contextTokens = new Map<string, string>();
 
@@ -58,6 +65,7 @@ export class IlinkClient {
     this.crypto = opts.crypto ?? portableCrypto;
     this.cdnBase = (opts.cdnBase ?? DEFAULT_CDN_BASE).replace(/\/+$/, "");
     this.timeoutMs = opts.timeoutMs ?? 15_000;
+    this.downloadRetryDelaysMs = opts.downloadRetryDelaysMs ?? DOWNLOAD_RETRY_DELAYS_MS;
   }
 
   loadTokens(tokens: Record<string, string>): void {
@@ -136,13 +144,55 @@ export class IlinkClient {
       url = `${this.cdnBase}/download?encrypted_query_param=${encodeURIComponent(media.encrypt_query_param)}`;
     else throw new Error("CDNMedia has neither full_url nor encrypt_query_param");
 
-    const resp = await this.fetch(url, { signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS) });
-    if (resp.status !== 200) throw new Error(`cdn download: status ${resp.status}`);
-    const len = Number(resp.headers.get("content-length") ?? "0");
-    if (len > MAX_MEDIA_BYTES) throw new WxBotError("too_large", "media too large (>100 MB)");
-    const encrypted = new Uint8Array(await resp.arrayBuffer());
-    if (encrypted.length > MAX_MEDIA_BYTES) throw new WxBotError("too_large", "media too large (>100 MB)");
-    return this.crypto.decryptAesEcb(encrypted, key);
+    let lastErr: Error = new Error("cdn download failed");
+    let attempts = 0;
+    for (let attempt = 1; attempt <= DOWNLOAD_MAX_ATTEMPTS; attempt++) {
+      attempts = attempt;
+      let resp: Response;
+      try {
+        resp = await this.fetch(url, { signal: AbortSignal.timeout(DOWNLOAD_ATTEMPT_TIMEOUT_MS) });
+      } catch (err) {
+        lastErr = err as Error;
+        if (attempt < DOWNLOAD_MAX_ATTEMPTS) {
+          await sleep(this.downloadRetryDelaysMs[attempt - 1] ?? 0);
+          continue;
+        }
+        break;
+      }
+
+      if (resp.status !== 200) {
+        lastErr = new Error(`cdn download: status ${resp.status}`);
+        await resp.body?.cancel();
+        if (retryableDownloadStatus(resp.status) && attempt < DOWNLOAD_MAX_ATTEMPTS) {
+          await sleep(this.downloadRetryDelaysMs[attempt - 1] ?? 0);
+          continue;
+        }
+        break;
+      }
+
+      const len = Number(resp.headers.get("content-length") ?? "0");
+      if (len > MAX_MEDIA_BYTES) {
+        await resp.body?.cancel();
+        throw withAttemptCount(new WxBotError("too_large", "media too large (>100 MB)"), attempt);
+      }
+      let encrypted: Uint8Array;
+      try {
+        encrypted = new Uint8Array(await resp.arrayBuffer());
+      } catch (err) {
+        lastErr = err as Error;
+        if (attempt < DOWNLOAD_MAX_ATTEMPTS) {
+          await sleep(this.downloadRetryDelaysMs[attempt - 1] ?? 0);
+          continue;
+        }
+        break;
+      }
+      if (encrypted.length > MAX_MEDIA_BYTES) {
+        throw withAttemptCount(new WxBotError("too_large", "media too large (>100 MB)"), attempt);
+      }
+      // Decrypt after a successful download; do not retry crypto failures.
+      return this.crypto.decryptAesEcb(encrypted, key);
+    }
+    throw withAttemptCount(lastErr, attempts);
   }
 
   private async sendItem(wxid: string, item: MessageItem): Promise<void> {
@@ -268,4 +318,20 @@ function uploadMediaType(itemType: number): number {
     default:
       return UploadMediaType.File;
   }
+}
+
+/** 5xx, 408, and 429 are retried; other 4xx and too_large are not. */
+function retryableDownloadStatus(status: number): boolean {
+  return status === 408 || status === 429 || status >= 500;
+}
+
+function withAttemptCount(err: Error, attempts: number): Error {
+  const suffix = ` (${attempts} attempt${attempts === 1 ? "" : "s"})`;
+  if (err instanceof WxBotError) return new WxBotError(err.kind, err.message + suffix, { cause: err });
+  return new Error(`${err.message}${suffix}`, { cause: err });
+}
+
+function sleep(ms: number): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((r) => setTimeout(r, ms));
 }

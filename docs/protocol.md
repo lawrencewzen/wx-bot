@@ -59,7 +59,7 @@ wx-bot 收到微信消息后，先写入本地收件箱，写成功才推进 iLi
 | `media` | array | 已下载到本机的媒体，始终是数组（可能为空） |
 | `media[].type` | string | `image` / `voice` / `file` / `video` |
 | `media[].path` | string | 本机绝对路径（见第 6 节） |
-| `media_errors` | array | 下载失败的媒体说明，可选 |
+| `media_errors` | array | 下载失败的媒体说明，可选；含尝试次数，如 `image: The operation timed out. (3 attempts)` |
 | `has_context_token` | bool | 当前能否回复该用户 |
 | `reply_hint` | string | 回复命令示例，方便 LLM 直接参考 |
 

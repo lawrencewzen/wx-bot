@@ -12,6 +12,22 @@ export function memorySql(path = ":memory:"): Sql & { db: Database } {
   };
 }
 
+export type FetchStep = Response | Error | (() => Response | Promise<Response>);
+
+/** Fake fetch that consumes scripted results in order (repeats the last step if exhausted). */
+export function scriptedFetch(steps: FetchStep[]) {
+  if (steps.length === 0) throw new Error("scriptedFetch: steps must not be empty");
+  const calls: string[] = [];
+  const fetch = async (input: string | URL | Request) => {
+    calls.push(String(input));
+    const step = steps[Math.min(calls.length - 1, steps.length - 1)]!;
+    if (step instanceof Error) throw step;
+    if (typeof step === "function") return step();
+    return step;
+  };
+  return { fetch, calls };
+}
+
 export type Handler = (req: Request) => Response | Promise<Response>;
 
 /** Start a local HTTP server; stopped automatically by the returned stop(). */
