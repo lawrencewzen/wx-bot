@@ -128,7 +128,7 @@ X-WxBot-Timestamp: <unix 秒>                 # 配置了 secret 时
   | 400、413、422 | 认为事件本身不可接受，放弃该事件（`status` 中计为 dead） |
   | 其他 4xx、5xx、超时、网络错误 | 退避重投：2s、4s、8s……最长 5 分钟一次，直到成功 |
 
-- 一条事件失败不阻塞后面的事件；`wx-bot run` 重启后继续投递未送达的事件。
+- 一条事件失败不阻塞后面的事件；`wx-bot run` 重启后继续投递未送达的事件。已放弃（dead）的事件可用 `wx-bot inbox requeue [--binding B] [event_id...]` 重新放回待投递。
 
 ### 3.2 pull（拉取）
 
@@ -178,7 +178,7 @@ POST /v1/events/ack     {"event_ids": ["muse:1001"]}
 - **至少一次**：同一事件可能送达多次（重投、租约过期、进程重启）。
 - **Agent 必须去重**：用 `event_id`（等价于 `binding + message_id`）作为幂等键。wx-bot 自身也会按 `event_id` 去重，但不能保证 Agent 只收到一次。
 - **顺序**：同一 binding 按到达顺序投递，但失败重投的事件可能晚于后来的事件。需要严格顺序时按 `create_time`、`message_id` 排序。
-- **保留期**：已送达和已放弃的事件保留 7 天后清除；7 天内一直未送达的事件被放弃。
+- **保留期**：已送达和已放弃的事件保留 7 天后清除；7 天内一直未送达的事件被放弃。清除前可用 `wx-bot inbox requeue` 把 dead 事件重新放回队列。
 
 ## 5. 回复接口
 

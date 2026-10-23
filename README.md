@@ -98,6 +98,7 @@ wx-bot send --binding xiaox --to <wxid> --image ./a.jpg   # 还有 --file / --vi
 | --- | --- |
 | 看状态 | `wx-bot status` |
 | 排查收不到消息 | `wx-bot health --grace 0` |
+| 重放已放弃（dead）的消息 | `wx-bot inbox requeue [--binding B] [event_id...]` |
 | 升级（不用重新扫码） | `wx-bot update` |
 | 回滚 | `wx-bot update --version <版本>` |
 | 卸载 | `wx-bot uninstall --yes`（加 `--keep-data` 保留登录） |

@@ -1,5 +1,5 @@
 import { PULL_LIMITS, pullResponseBody, pullScope, claimWait } from "@wx-bot/core";
-import { inboxPath, loadConfig, pullBindings } from "../config.ts";
+import { findBinding, inboxPath, loadConfig, pullBindings } from "../config.ts";
 import { formatDuration, parseDuration } from "../duration.ts";
 import { FlagError, parseFlags } from "../flags.ts";
 import { mkdir0700 } from "../fsutil.ts";
@@ -9,15 +9,19 @@ const USAGE = `usage:
   wx-bot inbox count [--binding B]
   wx-bot inbox pull  [--binding B] [--limit N] [--lease 5m] [--wait 0s]
   wx-bot inbox ack   <event_id>...
+  wx-bot inbox requeue [--binding B] [event_id...]
 
-Only bindings with "delivery": "pull" are served.
-count  prints how many events are ready (does not claim; safe for dry runs).
-pull   claims events and prints {"events": [...]}; unacked events return after the lease.
-ack    marks events handled and prints {"acked": N}.
+count/pull/ack only serve bindings with "delivery": "pull".
+requeue works for webhook and pull bindings.
+count   prints how many events are ready (does not claim; safe for dry runs).
+pull    claims events and prints {"events": [...]}; unacked events return after the lease.
+ack     marks events handled and prints {"acked": N}.
+requeue puts dead events back on the queue and prints {"requeued": N}.
+        With no event_id, every dead event of the binding (or all bindings) is requeued.
 `;
 
 const SPEC = {
-  binding: { type: "string", usage: "pull binding (default: all pull bindings)", default: "" },
+  binding: { type: "string", usage: "restrict to this binding (default: all)", default: "" },
   limit: { type: "int", usage: "max events to claim", default: PULL_LIMITS.defaultLimit },
   lease: { type: "string", usage: "how long claimed events stay hidden before redelivery", default: "5m0s" },
   wait: { type: "string", usage: "long-poll: wait up to this long for an event", default: "0s" },
@@ -45,11 +49,20 @@ export async function cmdInbox(configPath: string, args: string[]): Promise<numb
 
   const cfg = await loadConfig(configPath).catch((e: Error) => e);
   if (cfg instanceof Error) return console.error(`wx-bot: ${cfg.message}`), 1;
+  if (sub !== "count" && sub !== "pull" && sub !== "ack" && sub !== "requeue") {
+    console.error(`wx-bot inbox: unknown subcommand "${sub}"`);
+    return process.stderr.write(USAGE), 2;
+  }
   let scope: string[];
-  try {
-    scope = pullScope(pullBindings(cfg), v.binding);
-  } catch (err) {
-    return console.error(`wx-bot inbox: ${(err as Error).message}`), 1;
+  if (sub === "requeue") {
+    if (v.binding && !findBinding(cfg, v.binding)) return console.error(`wx-bot inbox: unknown binding "${v.binding}"`), 1;
+    scope = v.binding ? [v.binding] : [];
+  } else {
+    try {
+      scope = pullScope(pullBindings(cfg), v.binding);
+    } catch (err) {
+      return console.error(`wx-bot inbox: ${(err as Error).message}`), 1;
+    }
   }
   let box;
   try {
@@ -82,6 +95,9 @@ export async function cmdInbox(configPath: string, args: string[]): Promise<numb
         console.log(JSON.stringify({ acked: box.ack(scope, parsed.rest) }));
         return 0;
       }
+      case "requeue":
+        console.log(JSON.stringify({ requeued: box.requeueDead(scope, parsed.rest) }));
+        return 0;
       default:
         console.error(`wx-bot inbox: unknown subcommand "${sub}"`);
         process.stderr.write(USAGE);

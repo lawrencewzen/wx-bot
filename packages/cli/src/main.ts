@@ -29,7 +29,7 @@ Commands:
   login <binding>   Scan QR to log in a binding
   run               Poll iLink, queue messages, deliver to webhooks
   send              Send a message (see wx-bot send -h)
-  inbox             Claim / ack queued events for pull bindings (see wx-bot inbox)
+  inbox             Claim / ack pull events, or requeue dead ones (see wx-bot inbox)
   status            Show per-binding login / poll / delivery / inbox state
   health            Exit 1 with a hint if a binding cannot receive messages
   update            Upgrade to the latest release (see wx-bot update -h)

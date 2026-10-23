@@ -212,6 +212,26 @@ export class Inbox {
     );
   }
 
+  /**
+   * Put matching dead events back on the pending queue so claim can pick them
+   * up. Empty bindings or eventIds means no filter on that column. last_error
+   * is kept. Returns how many rows changed.
+   */
+  requeueDead(bindings: string[], eventIds?: string[]): number {
+    let q = `UPDATE events SET state = ?, next_at = ?, lease_until = 0, attempts = 0, done_at = 0
+             WHERE state = ?`;
+    const params: SqlValue[] = [STATE_PENDING, this.now(), STATE_DEAD];
+    if (eventIds && eventIds.length > 0) {
+      q += ` AND event_id IN (${marks(eventIds.length)})`;
+      params.push(...eventIds);
+    }
+    if (bindings.length > 0) {
+      q += ` AND binding IN (${marks(bindings.length)})`;
+      params.push(...bindings);
+    }
+    return this.sql.run(q, ...params).changes;
+  }
+
   /** Delete finished events older than retention; give up on pending ones that waited longer. */
   prune(retentionMs: number): { expired: number; deleted: number } {
     const now = this.now();

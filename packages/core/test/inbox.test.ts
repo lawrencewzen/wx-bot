@@ -59,6 +59,58 @@ test("retry and dead", () => {
   expect(inbox.stats("a")).toEqual({ pending: 1, dead: 1 });
 });
 
+test("requeueDead makes a dead event claimable again", () => {
+  const { inbox } = make();
+  inbox.add("a", "a:1", enc("{}"));
+  inbox.claim(["a"], 1, 60_000);
+  inbox.dead("a:1", "bad request");
+  expect(inbox.claim(["a"], 10, 60_000)).toEqual([]);
+  expect(inbox.requeueDead([])).toBe(1);
+  const evs = inbox.claim(["a"], 10, 60_000);
+  expect(evs.map((e) => [e.eventId, e.attempts, e.lastError])).toEqual([["a:1", 1, "bad request"]]);
+  expect(inbox.stats("a")).toEqual({ pending: 1, dead: 0 });
+});
+
+test("requeueDead only moves the given event ids", () => {
+  const { inbox } = make();
+  inbox.add("a", "a:1", enc("{}"));
+  inbox.add("a", "a:2", enc("{}"));
+  inbox.claim(["a"], 2, 60_000);
+  inbox.dead("a:1", "x");
+  inbox.dead("a:2", "y");
+  expect(inbox.requeueDead([], ["a:1"])).toBe(1);
+  expect(inbox.claim(["a"], 10, 60_000).map((e) => e.eventId)).toEqual(["a:1"]);
+  expect(inbox.stats("a")).toEqual({ pending: 1, dead: 1 });
+});
+
+test("requeueDead leaves non-dead events alone", () => {
+  const { inbox } = make();
+  inbox.add("a", "a:pending", enc("{}"));
+  inbox.add("a", "a:done", enc("{}"));
+  inbox.add("a", "a:dead", enc("{}"));
+  expect(inbox.ack([], ["a:done"])).toBe(1);
+  inbox.claim(["a"], 10, 60_000);
+  inbox.dead("a:dead", "nope");
+  expect(inbox.requeueDead([], ["a:pending", "a:done", "a:dead", "a:missing"])).toBe(1);
+  expect(inbox.stats("a")).toEqual({ pending: 2, dead: 0 });
+  expect(inbox.ack([], ["a:done"])).toBe(0);
+});
+
+test("requeueDead filters by binding", () => {
+  const { inbox } = make();
+  inbox.add("a", "a:1", enc("{}"));
+  inbox.add("b", "b:1", enc("{}"));
+  inbox.claim(["a", "b"], 2, 60_000);
+  inbox.dead("a:1", "x");
+  inbox.dead("b:1", "x");
+  expect(inbox.requeueDead(["b"])).toBe(1);
+  expect(inbox.stats("a")).toEqual({ pending: 0, dead: 1 });
+  expect(inbox.stats("b")).toEqual({ pending: 1, dead: 0 });
+  expect(inbox.requeueDead(["b"], ["a:1"])).toBe(0);
+  expect(inbox.requeueDead(["a", "b"])).toBe(1);
+  expect(inbox.stats("a")).toEqual({ pending: 1, dead: 0 });
+});
+
 test("prune", () => {
   const { inbox, clock } = make();
   inbox.add("a", "a:old-pending", enc("{}"));
