@@ -67,6 +67,8 @@ interface LoginState {
 
 /** How long one alarm runs before re-arming (alarm wall-clock limit is 15 min). */
 const ALARM_SLICE_MS = 14 * 60_000;
+/** Waiting QR whose poll timestamp has not moved: the alarm slice is not actually checking it. */
+const LOGIN_STALE_MS = 5_000;
 const RETENTION_MS = 7 * 86_400_000;
 const BINDING_RE = /^[a-z0-9_-]{1,32}$/;
 
@@ -79,6 +81,19 @@ const K = {
   config: "config",
   login: "login",
 } as const;
+
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) return resolve();
+    const timer = setTimeout(finish, ms);
+    function finish() {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", finish);
+      resolve();
+    }
+    signal.addEventListener("abort", finish, { once: true });
+  });
+}
 
 function doSql(storage: DurableObjectStorage): Sql {
   const bind = (p: SqlValue[]) => p.map((v) => (v instanceof Uint8Array ? v.slice().buffer : v));
@@ -144,6 +159,15 @@ export class WxBinding extends DurableObject<Env> {
     await this.ctx.storage.delete(K.expired);
     if (cursor !== undefined) await this.ctx.storage.put(K.cursor, cursor);
     this.client = undefined;
+    await this.wake();
+  }
+
+  /**
+   * End the in-flight alarm slice and schedule the next one immediately.
+   * setAlarm does not preempt a running alarm(); without the abort, login and
+   * config changes wait out the current slice (up to ALARM_SLICE_MS).
+   */
+  private async wake(): Promise<void> {
     this.pollAbort?.abort();
     await this.ctx.storage.setAlarm(Date.now());
   }
@@ -200,7 +224,7 @@ export class WxBinding extends DurableObject<Env> {
     const path = url.pathname;
     try {
       if (path === "/login" && req.method === "POST") return json(200, await this.startLogin());
-      if (path === "/login" && req.method === "GET") return json(200, (await this.ctx.storage.get(K.login)) ?? { status: "idle" });
+      if (path === "/login" && req.method === "GET") return json(200, await this.loginView());
       if (path === "/session" && req.method === "PUT") {
         const b = (await req.json()) as { session?: Session; context_tokens?: Record<string, string>; cursor?: string };
         if (!b.session?.bot_token || !b.session.base_url) throw new WxBotError("bad_request", "session.bot_token and session.base_url are required");
@@ -224,7 +248,7 @@ export class WxBinding extends DurableObject<Env> {
         if (c.delivery !== "webhook" && c.delivery !== "pull") throw new WxBotError("bad_request", 'delivery must be "webhook" or "pull"');
         if (c.delivery === "webhook" && !c.webhook?.url) throw new WxBotError("bad_request", "webhook.url is required for webhook delivery");
         await this.ctx.storage.put(K.config, c);
-        await this.ctx.storage.setAlarm(Date.now());
+        await this.wake();
         return json(200, { ok: true });
       }
       if (path.startsWith("/media/") && req.method === "GET") {
@@ -257,38 +281,51 @@ export class WxBinding extends DurableObject<Env> {
     const qr = await new LoginApi().getQrCode();
     const st: LoginState = { status: "waiting", qrcode: qr.qrcode, qrcode_url: qr.imageContent, attempt: 1, updated_at: Date.now() };
     await this.ctx.storage.put(K.login, st);
-    await this.ctx.storage.setAlarm(Date.now());
+    await this.wake();
     return { status: st.status, qrcode_url: st.qrcode_url, attempt: st.attempt };
   }
 
-  /** Poll the QR status until confirmed, expired (after refreshes), or deadline. */
-  private async loginStep(deadline: number): Promise<void> {
+  private async loginView(): Promise<LoginState | { status: "idle" }> {
+    const st = await this.ctx.storage.get<LoginState>(K.login);
+    // Recovery when the slice missed startLogin's wake (or never armed): a poll
+    // that is actually running refreshes updated_at about once a second.
+    if (st?.status === "waiting" && Date.now() - st.updated_at >= LOGIN_STALE_MS) await this.wake();
+    return st ?? { status: "idle" };
+  }
+
+  /** Poll the QR status until confirmed, expired (after refreshes), aborted, or deadline. */
+  private async loginStep(deadline: number, signal: AbortSignal): Promise<void> {
     const api = new LoginApi();
-    for (;;) {
+    while (!signal.aborted && Date.now() <= deadline) {
       const st = await this.ctx.storage.get<LoginState>(K.login);
+      if (signal.aborted) return;
       if (!st || st.status !== "waiting" || !st.qrcode) return;
-      if (Date.now() > deadline) return;
       let next: LoginState;
       try {
-        const r = await api.checkQrStatus(st.qrcode, st.host);
+        const r = await api.checkQrStatus(st.qrcode, st.host, signal);
         if (r.state === "confirmed") {
           await this.useSession(r.session);
           next = { status: "confirmed", updated_at: Date.now() };
+        } else if (signal.aborted) {
+          return;
         } else if (r.state === "expired") {
           if ((st.attempt ?? 1) >= QR_MAX_EXPIRY) next = { status: "expired", updated_at: Date.now() };
           else {
-            const qr = await api.getQrCode();
+            const qr = await api.getQrCode(signal);
+            if (signal.aborted) return;
             next = { status: "waiting", qrcode: qr.qrcode, qrcode_url: qr.imageContent, attempt: (st.attempt ?? 1) + 1, updated_at: Date.now() };
           }
         } else {
           next = { ...st, host: r.host, updated_at: Date.now() };
         }
       } catch (err) {
+        // Waking the slice aborts the in-flight status check. That is not a failed login.
+        if (signal.aborted) return;
         next = { status: "failed", error: (err as Error).message, updated_at: Date.now() };
       }
       await this.ctx.storage.put(K.login, next);
       if (next.status !== "waiting") return;
-      await new Promise((r) => setTimeout(r, 1000));
+      await sleep(1000, signal);
     }
   }
 
@@ -302,50 +339,67 @@ export class WxBinding extends DurableObject<Env> {
     this.inbox.prune(RETENTION_MS);
 
     // Login, polling and delivery run side by side: a pending QR login must
-    // not pause message flow for the current session.
-    const tasks: Promise<unknown>[] = [this.loginStep(deadline)];
+    // not pause message flow for the current session. The same signal ends
+    // the slice early when login or config is updated.
     const ctl = new AbortController();
     this.pollAbort = ctl;
     const stopAt = setTimeout(() => ctl.abort(), Math.max(0, deadline - Date.now()));
-
-    let client: IlinkClient | undefined;
     try {
-      client = await this.liveClient();
-    } catch {
-      client = undefined;
-    }
-    if (client) {
-      const cfg = await this.config();
-      const storage = this.ctx.storage;
-      const poller = new Poller({
-        binding: name,
-        client,
-        inbox: this.inbox,
-        allow: await this.allow(),
-        media: this.mediaSink(),
-        log: (level, msg) => console[level === "info" ? "log" : level](`[${name}] ${msg}`),
-        store: {
-          loadCursor: async () => (await storage.get<string>(K.cursor)) ?? "",
-          saveCursor: (c) => storage.put(K.cursor, c),
-          saveTokens: (t) => storage.put(K.tokens, t),
-          markExpired: async () => {
-            await storage.put(K.expired, new Date().toISOString());
-            this.client = undefined;
-          },
-        },
-      });
-      tasks.push(poller.run(ctl.signal, deadline).finally(() => ctl.abort()));
-    }
-    const cfg = await this.config();
-    if (cfg.delivery === "webhook" && cfg.webhook?.url) tasks.push(this.deliverLoop(name, cfg.webhook, ctl.signal));
+      const tasks: Promise<unknown>[] = [this.loginStep(deadline, ctl.signal)];
 
-    await Promise.allSettled(tasks);
-    clearTimeout(stopAt);
-    // Keep going while there is work: a live session, pending login, or undelivered webhooks.
+      let client: IlinkClient | undefined;
+      try {
+        client = await this.liveClient();
+      } catch {
+        client = undefined;
+      }
+      if (client) {
+        const storage = this.ctx.storage;
+        const poller = new Poller({
+          binding: name,
+          client,
+          inbox: this.inbox,
+          allow: await this.allow(),
+          media: this.mediaSink(),
+          log: (level, msg) => console[level === "info" ? "log" : level](`[${name}] ${msg}`),
+          store: {
+            loadCursor: async () => (await storage.get<string>(K.cursor)) ?? "",
+            saveCursor: (c) => storage.put(K.cursor, c),
+            saveTokens: (t) => storage.put(K.tokens, t),
+            markExpired: async () => {
+              await storage.put(K.expired, new Date().toISOString());
+              this.client = undefined;
+            },
+          },
+        });
+        tasks.push(poller.run(ctl.signal, deadline).finally(() => ctl.abort()));
+      }
+      const cfg = await this.config();
+      if (cfg.delivery === "webhook" && cfg.webhook?.url) tasks.push(this.deliverLoop(name, cfg.webhook, ctl.signal));
+
+      await Promise.allSettled(tasks);
+      await this.armNext(name);
+    } finally {
+      clearTimeout(stopAt);
+    }
+  }
+
+  /**
+   * Keep going while there is work: a live session, pending login, or
+   * undelivered webhooks. A wake() during this handler already called
+   * setAlarm(now); getAlarm() is null until that happens, and a later
+   * +1s backoff must not postpone the earlier alarm.
+   */
+  private async armNext(name: string): Promise<void> {
+    const cfg = await this.config();
     const login = await this.ctx.storage.get<LoginState>(K.login);
     const pending = cfg.delivery === "webhook" && this.inbox.stats(name).pending > 0;
-    if ((await this.session()) && !(await this.ctx.storage.get(K.expired))) await this.ctx.storage.setAlarm(Date.now());
-    else if (login?.status === "waiting" || pending) await this.ctx.storage.setAlarm(Date.now() + 1000);
+    let next: number | null = null;
+    if ((await this.session()) && !(await this.ctx.storage.get(K.expired))) next = Date.now();
+    else if (login?.status === "waiting" || pending) next = Date.now() + 1_000;
+    if (next === null) return;
+    const existing = await this.ctx.storage.getAlarm();
+    if (existing === null || next < existing) await this.ctx.storage.setAlarm(next);
   }
 
   private async deliverLoop(name: string, webhook: WebhookConfig, signal: AbortSignal) {
