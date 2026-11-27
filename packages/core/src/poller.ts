@@ -1,4 +1,4 @@
-import type { IlinkClient } from "./client.ts";
+import { POLL_TIMEOUT_SLACK_MS, type IlinkClient } from "./client.ts";
 import { buildEvent, encodeEvent, type MediaSink, type WxEvent } from "./events.ts";
 import type { Inbox } from "./inbox.ts";
 import { ERR_CODE_EXPIRED, type IncomingMessage } from "./types.ts";
@@ -33,6 +33,19 @@ export interface PollerOptions {
 export type PollHealth = { ok: true } | { ok: false; error: string };
 
 export type PollerExit = "stopped" | "expired" | "deadline";
+
+/**
+ * Upper bound for one getupdates hold, whether it came from options or the server.
+ * `status` treats health.json older than 5 minutes as a stalled poller, and a
+ * healthy write can be skipped for 30s, so the hold plus the client slack (10s)
+ * has to finish inside that window. The server's usual value is 35s.
+ */
+export const MAX_POLL_TIMEOUT_MS = 3 * 60_000;
+
+function boundedPollTimeout(ms: number): number {
+  if (!Number.isFinite(ms) || ms <= 0) return Math.min(35_000, MAX_POLL_TIMEOUT_MS);
+  return Math.min(ms, MAX_POLL_TIMEOUT_MS);
+}
 
 const sleep = (ms: number, signal?: AbortSignal) =>
   new Promise<void>((resolve) => {
@@ -89,7 +102,7 @@ export class Poller {
     } catch (err) {
       this.log("warn", `load cursor: ${(err as Error).message}`);
     }
-    let pollTimeout = o.pollTimeoutMs;
+    let pollTimeout = boundedPollTimeout(o.pollTimeoutMs);
     let failures = 0;
 
     const pause = async () => {
@@ -99,7 +112,7 @@ export class Poller {
 
     for (;;) {
       if (signal?.aborted) return "stopped";
-      if (deadlineMs !== undefined && Date.now() + pollTimeout + 10_000 > deadlineMs) return "deadline";
+      if (deadlineMs !== undefined && Date.now() + pollTimeout + POLL_TIMEOUT_SLACK_MS > deadlineMs) return "deadline";
 
       let resp;
       try {
@@ -125,7 +138,14 @@ export class Poller {
         continue;
       }
       failures = 0;
-      if (resp.longpolling_timeout_ms && resp.longpolling_timeout_ms > 0) pollTimeout = resp.longpolling_timeout_ms;
+      const suggested = resp.longpolling_timeout_ms;
+      if (typeof suggested === "number" && Number.isFinite(suggested) && suggested > 0) {
+        const next = Math.min(suggested, MAX_POLL_TIMEOUT_MS);
+        if (suggested > next && next !== pollTimeout) {
+          this.log("warn", `longpolling_timeout_ms ${suggested} capped at ${MAX_POLL_TIMEOUT_MS}`);
+        }
+        pollTimeout = next;
+      }
 
       let queued = true;
       for (const msg of resp.msgs ?? []) {
