@@ -28,6 +28,11 @@ export interface ClientOptions {
   timeoutMs?: number;
   /** Backoff between CDN download retries (default 1s, then 3s). */
   downloadRetryDelaysMs?: number[];
+  /**
+   * Extra wait past the getupdates hold before giving up (default 10s).
+   * The server may answer right as the hold ends; this keeps that response.
+   */
+  pollSlackMs?: number;
 }
 
 export interface MediaToSend {
@@ -43,6 +48,15 @@ const UPLOAD_TIMEOUT_MS = 5 * 60_000;
 const DOWNLOAD_ATTEMPT_TIMEOUT_MS = 90_000;
 const DOWNLOAD_MAX_ATTEMPTS = 3;
 const DOWNLOAD_RETRY_DELAYS_MS = [1_000, 3_000];
+/** Added to the getupdates hold. Matches the official plugin's client-side margin. */
+export const POLL_TIMEOUT_SLACK_MS = 10_000;
+/**
+ * After abort(), how long fetch or the body read may take to reject.
+ * Bun can leave both pending on a half-open socket; past this the caller moves on.
+ */
+const ABORT_SETTLE_MS = 500;
+/** setTimeout coerces larger delays to 1ms, which would abort a healthy long-poll immediately. */
+const MAX_TIMER_MS = 2_147_483_647;
 
 /** Talks to the iLink bot API for one logged-in binding. */
 export class IlinkClient {
@@ -53,6 +67,7 @@ export class IlinkClient {
   private readonly crypto: MediaCrypto;
   private readonly cdnBase: string;
   private readonly timeoutMs: number;
+  private readonly pollSlackMs: number;
   private readonly downloadRetryDelaysMs: number[];
   /** Latest context_token per wxid; required to reply. */
   readonly contextTokens = new Map<string, string>();
@@ -65,6 +80,7 @@ export class IlinkClient {
     this.crypto = opts.crypto ?? portableCrypto;
     this.cdnBase = (opts.cdnBase ?? DEFAULT_CDN_BASE).replace(/\/+$/, "");
     this.timeoutMs = opts.timeoutMs ?? 15_000;
+    this.pollSlackMs = nonNegative(opts.pollSlackMs, POLL_TIMEOUT_SLACK_MS);
     this.downloadRetryDelaysMs = opts.downloadRetryDelaysMs ?? DOWNLOAD_RETRY_DELAYS_MS;
   }
 
@@ -78,28 +94,80 @@ export class IlinkClient {
 
   /**
    * One getupdates long-poll. A client-side timeout (server held the request
-   * past timeoutMs + 10s) returns an empty response, like the official plugin.
+   * past timeoutMs + pollSlackMs) returns an empty response, like the official
+   * plugin. The deadline does not depend on AbortSignal: Bun can leave fetch()
+   * or resp.text() pending on a half-open socket after abort, and awaiting that
+   * forever stalls the poller with no error. A caller abort settles immediately.
    */
   async getUpdates(cursor: string, timeoutMs: number, signal?: AbortSignal): Promise<GetUpdatesResponse> {
+    if (signal?.aborted) throw abortError(signal.reason);
+
     const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(new Error("poll timeout")), timeoutMs + 10_000);
-    const onAbort = () => ctl.abort(signal?.reason);
+    const hold = nonNegative(timeoutMs, 0);
+    const budget = Math.min(hold + this.pollSlackMs, MAX_TIMER_MS);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let grace: ReturnType<typeof setTimeout> | undefined;
+    let settled = false;
+    let timedOut = false;
+    let resp: Response | undefined;
+
+    let rejectGate: (err: unknown) => void = () => {};
+    const gate = new Promise<never>((_, reject) => {
+      rejectGate = reject;
+    });
+    const onAbort = () => {
+      const err = abortError(signal?.reason);
+      ctl.abort(err);
+      rejectGate(err);
+    };
     signal?.addEventListener("abort", onAbort, { once: true });
-    try {
-      const resp = await this.fetch(`${this.baseUrl}/ilink/bot/getupdates`, {
+    timer = setTimeout(() => {
+      timedOut = true;
+      ctl.abort(new Error("poll timeout"));
+      grace = setTimeout(() => {
+        if (!settled) rejectGate(new Error(`getupdates hung after ${budget}ms; abort did not settle the request`));
+      }, ABORT_SETTLE_MS);
+    }, budget);
+
+    const work = (async () => {
+      const r = await this.fetch(`${this.baseUrl}/ilink/bot/getupdates`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...appHeaders(this.token) },
         body: JSON.stringify({ get_updates_buf: cursor, base_info: BASE_INFO }),
         signal: ctl.signal,
       });
-      if (resp.status !== 200) throw new Error(`getupdates: status ${resp.status}`);
-      return parseIlinkJson<GetUpdatesResponse>(await resp.text());
+      resp = r;
+      if (r.status !== 200) {
+        await r.body?.cancel().catch(() => {});
+        throw new Error(`getupdates: status ${r.status}`);
+      }
+      return parseIlinkJson<GetUpdatesResponse>(await r.text());
+    })();
+    const guarded = work.then(
+      (value) => {
+        settled = true;
+        return value;
+      },
+      (err) => {
+        settled = true;
+        throw err;
+      },
+    );
+    // A read abandoned after the deadline can reject later. That must not be unhandled.
+    void guarded.catch(() => {});
+
+    try {
+      return await Promise.race([guarded, gate]);
     } catch (err) {
-      if (ctl.signal.aborted && !signal?.aborted) return {};
+      if (signal?.aborted) throw err;
+      if (timedOut && !settled) throw err;
+      if (timedOut || ctl.signal.aborted) return {};
       throw err;
     } finally {
-      clearTimeout(timer);
+      if (timer !== undefined) clearTimeout(timer);
+      if (grace !== undefined) clearTimeout(grace);
       signal?.removeEventListener("abort", onAbort);
+      if (!settled) cancelBody(resp);
     }
   }
 
@@ -334,4 +402,23 @@ function withAttemptCount(err: Error, attempts: number): Error {
 function sleep(ms: number): Promise<void> {
   if (ms <= 0) return Promise.resolve();
   return new Promise((r) => setTimeout(r, ms));
+}
+
+function nonNegative(ms: number | undefined, fallback: number): number {
+  return typeof ms === "number" && Number.isFinite(ms) && ms >= 0 ? ms : fallback;
+}
+
+function abortError(reason: unknown): Error {
+  if (reason instanceof Error) return reason;
+  if (typeof reason === "string" && reason) return new Error(reason);
+  return new Error("aborted");
+}
+
+function cancelBody(resp: Response | undefined): void {
+  try {
+    const pending = resp?.body?.cancel();
+    if (pending) void pending.catch(() => {});
+  } catch {
+    // The body may already be closed. Cleanup must not hide the poll error.
+  }
 }

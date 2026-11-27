@@ -1,9 +1,9 @@
 import { afterEach, expect, test } from "bun:test";
-import { IlinkClient } from "../src/client.ts";
+import { IlinkClient, type FetchLike } from "../src/client.ts";
 import { encryptAes128Ecb, toHex } from "../src/crypto.ts";
 import type { MediaSink, WxEvent } from "../src/events.ts";
 import { Inbox } from "../src/inbox.ts";
-import { Poller, type PollerStore, type PollHealth } from "../src/poller.ts";
+import { MAX_POLL_TIMEOUT_MS, Poller, type PollerStore, type PollHealth } from "../src/poller.ts";
 import { ItemType, type GetUpdatesResponse } from "../src/types.ts";
 import { memorySql, serve, until } from "./helpers.ts";
 
@@ -234,6 +234,207 @@ test("non-owner senders are not queued even if forwardUnallowed is true", async 
   expect(t.events().length).toBe(0);
   expect(t.s.tokens).toEqual({});
   expect(logs.some(([, msg]) => msg.includes("unallowed sender wxid_stranger"))).toBe(true);
+});
+
+test("server longpolling_timeout_ms is capped; a normal value is kept", async () => {
+  const bodies = [
+    JSON.stringify({ get_updates_buf: "c1", longpolling_timeout_ms: 9_999_999 }),
+    JSON.stringify({ get_updates_buf: "c2", longpolling_timeout_ms: 9_999_999 }),
+    JSON.stringify({ get_updates_buf: "c3", longpolling_timeout_ms: 35_000 }),
+    JSON.stringify({ get_updates_buf: "c4", longpolling_timeout_ms: 50_000 }),
+    JSON.stringify({ get_updates_buf: "c5", longpolling_timeout_ms: 0 }),
+    JSON.stringify({ get_updates_buf: "c6" }),
+  ];
+  const il = fakeIlink(bodies);
+  const client = new IlinkClient({ bot_token: "bot-secret", base_url: il.url, ilink_bot_id: "bot@im.bot", ilink_user_id: "wxid_owner" });
+  const seen: number[] = [];
+  const orig = client.getUpdates.bind(client);
+  client.getUpdates = (cursor, timeoutMs, signal) => {
+    seen.push(timeoutMs);
+    return orig(cursor, timeoutMs, signal);
+  };
+  const logs: string[] = [];
+  const { s, store } = memStore();
+  const poller = new Poller({
+    binding: "xiaox",
+    client,
+    store,
+    inbox: new Inbox(memorySql()),
+    media: memSink(),
+    allow: new Set(["wxid_owner"]),
+    pollTimeoutMs: 200,
+    retryDelayMs: 10,
+    backoffDelayMs: 20,
+    log: (_level, msg) => logs.push(msg),
+  });
+  const ctl = new AbortController();
+  const done = poller.run(ctl.signal);
+  await until(() => s.cursor === "c6", 3000, "cursor c6");
+  ctl.abort();
+  expect(await done).toBe("stopped");
+  expect(seen.slice(0, 6)).toEqual([200, MAX_POLL_TIMEOUT_MS, MAX_POLL_TIMEOUT_MS, 35_000, 50_000, 50_000]);
+  expect(logs.filter((m) => m.includes("capped"))).toEqual([
+    `longpolling_timeout_ms 9999999 capped at ${MAX_POLL_TIMEOUT_MS}`,
+  ]);
+});
+
+test("a configured poll timeout above the cap still polls", async () => {
+  const il = fakeIlink([JSON.stringify({ get_updates_buf: "c1" })]);
+  const client = new IlinkClient({ bot_token: "bot-secret", base_url: il.url, ilink_bot_id: "bot@im.bot", ilink_user_id: "wxid_owner" });
+  const seen: number[] = [];
+  const orig = client.getUpdates.bind(client);
+  client.getUpdates = (cursor, timeoutMs, signal) => {
+    seen.push(timeoutMs);
+    return orig(cursor, timeoutMs, signal);
+  };
+  const { s, store } = memStore();
+  const poller = new Poller({
+    binding: "xiaox",
+    client,
+    store,
+    inbox: new Inbox(memorySql()),
+    media: memSink(),
+    allow: new Set(),
+    pollTimeoutMs: 9_999_999,
+  });
+  const ctl = new AbortController();
+  const done = poller.run(ctl.signal, Date.now() + 4 * 60_000);
+  await until(() => s.cursor === "c1", 3000, "cursor");
+  ctl.abort();
+  expect(await done).toBe("stopped");
+  expect(seen[0]).toBe(MAX_POLL_TIMEOUT_MS);
+});
+
+test("a hung getupdates is logged and the next poll runs", async () => {
+  let calls = 0;
+  const fetch: FetchLike = (_input, init) => {
+    calls++;
+    if (calls === 1) {
+      return new Promise(() => {
+        init?.signal?.addEventListener("abort", () => {});
+      });
+    }
+    if (calls === 2) return Promise.resolve(new Response(JSON.stringify({ get_updates_buf: "recovered" })));
+    // Later rounds hold, the way a real long-poll does, so the loop yields until shutdown.
+    return new Promise((_resolve, reject) => {
+      const stop = () => reject(Object.assign(new Error("The operation was aborted"), { name: "AbortError" }));
+      if (init?.signal?.aborted) stop();
+      else init?.signal?.addEventListener("abort", stop, { once: true });
+    });
+  };
+  const c = new IlinkClient(
+    { bot_token: "t", base_url: "https://ilink.test", ilink_bot_id: "b", ilink_user_id: "u" },
+    { fetch, pollSlackMs: 30 },
+  );
+  const logs: string[] = [];
+  const health: PollHealth[] = [];
+  const { s, store } = memStore();
+  const poller = new Poller({
+    binding: "xiaox",
+    client: c,
+    store,
+    inbox: new Inbox(memorySql()),
+    media: memSink(),
+    allow: new Set(),
+    pollTimeoutMs: 40,
+    retryDelayMs: 10,
+    backoffDelayMs: 20,
+    log: (_level, msg) => logs.push(msg),
+    onHealth: (h) => health.push(h),
+  });
+  const ctl = new AbortController();
+  const done = poller.run(ctl.signal);
+  await until(() => s.cursor === "recovered", 3000, "recovered");
+  ctl.abort();
+  expect(await done).toBe("stopped");
+  expect(calls).toBeGreaterThanOrEqual(2);
+  expect(health[0]?.ok).toBe(false);
+  if (health[0] && !health[0].ok) expect(health[0].error).toContain("abort did not settle");
+  expect(health.at(-1)).toEqual({ ok: true });
+  expect(logs.some((m) => m.includes("getupdates error") && m.includes("abort did not settle"))).toBe(true);
+});
+
+test("abort during a hung getupdates stops the poller without a health error", async () => {
+  const fetch: FetchLike = (_input, init) =>
+    new Promise(() => {
+      init?.signal?.addEventListener("abort", () => {});
+    });
+  const c = new IlinkClient(
+    { bot_token: "t", base_url: "https://ilink.test", ilink_bot_id: "b", ilink_user_id: "u" },
+    { fetch, pollSlackMs: 5_000 },
+  );
+  const health: PollHealth[] = [];
+  const poller = new Poller({
+    binding: "xiaox",
+    client: c,
+    store: memStore().store,
+    inbox: new Inbox(memorySql()),
+    media: memSink(),
+    allow: new Set(),
+    pollTimeoutMs: 30_000,
+    onHealth: (h) => health.push(h),
+  });
+  const ctl = new AbortController();
+  const started = Date.now();
+  const done = poller.run(ctl.signal);
+  setTimeout(() => ctl.abort(), 20);
+  expect(await done).toBe("stopped");
+  expect(Date.now() - started).toBeLessThan(1_000);
+  expect(health).toEqual([]);
+});
+
+test("a client timeout that aborts the fetch stays a healthy empty poll", async () => {
+  let calls = 0;
+  const fetch: FetchLike = (_input, init) =>
+    new Promise((resolve, reject) => {
+      calls++;
+      if (calls === 1) {
+        const timer = setTimeout(() => resolve(new Response("{}")), 60_000);
+        init?.signal?.addEventListener("abort", () => {
+          clearTimeout(timer);
+          const err = new Error("The operation was aborted");
+          err.name = "AbortError";
+          reject(err);
+        }, { once: true });
+        return;
+      }
+      if (calls === 2) {
+        resolve(new Response(JSON.stringify({ get_updates_buf: "after-timeout" })));
+        return;
+      }
+      const stop = () => {
+        const err = new Error("The operation was aborted");
+        err.name = "AbortError";
+        reject(err);
+      };
+      if (init?.signal?.aborted) stop();
+      else init?.signal?.addEventListener("abort", stop, { once: true });
+    });
+  const c = new IlinkClient(
+    { bot_token: "t", base_url: "https://ilink.test", ilink_bot_id: "b", ilink_user_id: "u" },
+    { fetch, pollSlackMs: 30 },
+  );
+  const health: PollHealth[] = [];
+  const { s, store } = memStore();
+  const poller = new Poller({
+    binding: "xiaox",
+    client: c,
+    store,
+    inbox: new Inbox(memorySql()),
+    media: memSink(),
+    allow: new Set(),
+    pollTimeoutMs: 40,
+    retryDelayMs: 10,
+    backoffDelayMs: 20,
+    onHealth: (h) => health.push(h),
+  });
+  const ctl = new AbortController();
+  const done = poller.run(ctl.signal);
+  await until(() => s.cursor === "after-timeout", 3000, "after timeout");
+  ctl.abort();
+  expect(await done).toBe("stopped");
+  expect(health.length).toBeGreaterThanOrEqual(2);
+  expect(health.every((h) => h.ok)).toBe(true);
 });
 
 test("deadline stops before a poll that would overrun", async () => {
